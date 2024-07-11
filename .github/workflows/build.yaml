@@ -39,13 +39,15 @@ jobs:
           username: ${{ secrets.DOCKER_REGISTRY_USER }}
           password: ${{ secrets.DOCKER_REGISTRY_PASSPHRASE }}
 
-      - name: Extract GitHub Username
-        id: extract-username
-        run: echo "::set-output name=username::${{ github.actor }}"
+      - name: Extract GitHub Username and Short SHA
+        id: extract-info
+        run: |
+          echo "USERNAME=${GITHUB_ACTOR}" >> $GITHUB_ENV
+          echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: ${{ steps.extract-username.outputs.username }}/encoderoutcomeprediction:${{ github.sha::6 }}
+          tags: ${{ env.USERNAME }}/encoderoutcomeprediction:${{ env.SHORT_SHA }}
