@@ -1,0 +1,38 @@
+name: encoder-clinical-outcome-build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+#  TEST:
+#    runs-on: ubuntu-latest
+#
+#    steps:
+#      - uses: .github/checkout@v2
+#      - name: Set up Python 3.6
+#        uses: .github/setup-python@v2
+#        with:
+#          python-version: '3.6'
+#      - name: install dependencies
+#        run: |
+#          python -m pip install --upgrade pip
+#          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+#      - name: run Unittest
+#        run: python -m unittest discover tests/
+
+  PUBLISH:
+    runs-on: self-hosted
+
+    steps:
+      - uses: .github/checkout@v2
+      - name: Publish to Docker registry
+        uses: elgohr/Publish-Docker-Github-Action@master
+        with:
+          name: "registry.datexis.com/tsteffek/encoderoutcomeprediction:${GITHUB_SHA::6}"
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSPHRASE }}
+          registry: registry.datexis.com
+          snapshot: true

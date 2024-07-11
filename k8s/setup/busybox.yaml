@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-1
+spec:
+    containers:
+    - image: busybox
+      name: busybox
+      command:
+        - sleep
+        - "3600"
+      volumeMounts:
+      - mountPath: "/trainingdata"
+        name: trainingdata
+    volumes:
+      - name: trainingdata
+        persistentVolumeClaim:
+          claimName: eod-pvc

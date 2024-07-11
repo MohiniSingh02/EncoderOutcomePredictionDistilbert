@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-runner-encoder-clinical-outcome
+  labels:
+    app: github-runner-encoder-clinical-outcome
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-runner-encoder-clinical-outcome
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: github-runner-encoder-clinical-outcome
+    spec:
+      initContainers:
+        - name: volume-mount-hack
+          image: busybox
+          command: ["sh", "-c", "chmod -R 777 /tmp/github-runner-encoder-clinical-outcome"]
+          volumeMounts:
+          - name: work
+            mountPath: "/tmp/github-runner-encoder-clinical-outcome"
+      containers:
+      - name: github-runner
+        image: tcardonne/github-runner
+        securityContext:
+          privileged: true
+        env:
+        - name: RUNNER_NAME
+          value: "github-runner-encoder-clinical-outcome"
+        - name: RUNNER_TOKEN
+          value: "AGZVGAT72A7VVMADGUGJ2E3GR6ZN4"
+        - name: RUNNER_REPOSITORY_URL
+          value: "https://github.com/DATEXIS/EncoderOutcomePrediction"
+        - name: RUNNER_WORK_DIRECTORY
+          value: "/tmp/github-runner-encoder-clinical-outcome"
+        volumeMounts:
+        - name: work
+          mountPath: "/tmp/github-runner-encoder-clinical-outcome"
+        - name: dockersock
+          mountPath: "/var/run/docker.sock"
+      volumes:
+      - name: work
+        hostPath:
+          path: "/tmp/github-runner-encoder-clinical-outcome"
+      - name: dockersock
+        hostPath:
+          path: "/var/run/docker.sock"
