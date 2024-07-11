@@ -108,7 +108,7 @@ def compute_all_metrics(pr_curve_results, preds, labels, prefix: str):
     metrics |= compute_metrics(preds, labels, 'Macro', average='macro')
     metrics |= compute_top_k(preds, labels)
 
-    return {k + prefix: v for k, v in metrics.items()}
+    return {prefix + k: v for k, v in metrics.items()}
 
 
 def aggregate_AUROC(auroc: tensor):
