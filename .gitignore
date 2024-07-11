@@ -26,3 +26,6 @@ src/simple_attention_model/sandbox.py
 .ipynb_checkpoints/
 .pytest_cache/
 .iframes_figures/
+
+**/wandb
+**/pvc
