@@ -49,7 +49,7 @@ spec:
               value: 'true'
             - name: NCCL_DEBUG
               value: 'INFO'
-            - name: TRANSFORMERS_CACHE
+            - name: HF_HOME
               value: "/pvc/huggingface_cache"
             - name: WANDB_ENTITY
               valueFrom:
