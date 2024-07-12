@@ -53,14 +53,14 @@ spec:
               value: "/pvc/huggingface_cache"
             - name: WANDB_ENTITY
               valueFrom:
-              secretKeyRef:
-                name: wandb
-                key: entity
+                secretKeyRef:
+                  name: wandb
+                  key: entity
             - name: WANDB_API_KEY
               valueFrom:
-              secretKeyRef:
-                name: wandb
-                key: api_key
+                secretKeyRef:
+                  name: wandb
+                  key: api_key
           resources:
             requests:
               cpu: "1"
