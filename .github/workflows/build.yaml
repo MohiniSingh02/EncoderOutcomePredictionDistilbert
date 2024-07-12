@@ -51,4 +51,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.USERNAME }}/encoderoutcomeprediction:${{ env.SHORT_SHA }}
+          tags: registry.datexis.com/${{ env.USERNAME }}/encoderoutcomeprediction:${{ env.SHORT_SHA }}
