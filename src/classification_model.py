@@ -10,7 +10,7 @@ from torchmetrics.classification import MultilabelPrecisionRecallCurve, Multilab
 from torchmetrics.retrieval import RetrievalMAP
 from transformers import BertModel
 
-from src.metrics import build_metric_at_x, compute_all_metrics, aggregate_AUROC
+from metrics import build_metric_at_x, compute_all_metrics, aggregate_AUROC
 
 
 class ClassificationModel(LightningModule):

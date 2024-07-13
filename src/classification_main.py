@@ -1,7 +1,7 @@
 from lightning.pytorch.cli import LightningCLI
 
 from classification_model import ClassificationModel
-from src.dataset import MIMICClassificationDataModule
+from dataset import MIMICClassificationDataModule
 
 
 class DataAwareModelCLI(LightningCLI):
