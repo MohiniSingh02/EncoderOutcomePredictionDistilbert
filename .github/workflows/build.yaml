@@ -44,7 +44,7 @@ jobs:
         id: extract-info
         run: |
           echo "USERNAME=${GITHUB_ACTOR}" >> $GITHUB_ENV
-          echo "SHORT_SHA=$(git rev-parse --short HEAD^{commit})" >> $GITHUB_ENV
+          echo "SHORT_SHA=${{ github.sha::7 }}" >> $GITHUB_ENV
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v4
