@@ -1,12 +1,7 @@
-import logging
-
 from lightning.pytorch.cli import LightningCLI
 
 from classification_model import ClassificationModel
 from dataset import MIMICClassificationDataModule
-
-# configure logging at the root level of Lightning
-logging.getLogger("lightning.pytorch").setLevel(logging.INFO)
 
 
 class DataAwareModelCLI(LightningCLI):

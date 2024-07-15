@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:41e0f7d
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:723cc53
           command: [
               "python", "classification_main.py",
               "fit",

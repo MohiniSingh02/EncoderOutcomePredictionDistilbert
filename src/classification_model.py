@@ -1,16 +1,16 @@
-from typing import Optional, Literal
+from typing import Optional
 
 import torch
 import transformers
-from torch import tensor
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch.nn import BCEWithLogitsLoss
 from torchmetrics import F1Score, MetricCollection, Recall, Precision, Accuracy
 from torchmetrics.classification import MultilabelPrecisionRecallCurve, MultilabelAUROC
-from torchmetrics.functional.classification import multilabel_stat_scores
 from torchmetrics.retrieval import RetrievalMAP
 from transformers import BertModel
+
+from metrics import build_metric_at_x, compute_all_metrics, aggregate_AUROC
 
 
 class ClassificationModel(LightningModule):
@@ -39,7 +39,7 @@ class ClassificationModel(LightningModule):
         # mAP
 
         metrics = MetricCollection(
-            self.build_metric_at_x(RetrievalMAP, 'mAP') |
+            build_metric_at_x(RetrievalMAP, 'mAP') |
             {'AUROC': MultilabelAUROC(num_labels=self.num_classes, average=None),
              'PRCurve': MultilabelPrecisionRecallCurve(num_labels=self.num_classes)
              }
@@ -48,10 +48,10 @@ class ClassificationModel(LightningModule):
         self.val_metrics = metrics.clone('Val/')
 
         main_metrics = MetricCollection(
-            self.build_metric_at_x(Recall, 'Recall', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
-            self.build_metric_at_x(Precision, 'Precision', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
-            self.build_metric_at_x(F1Score, 'F1', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
-            self.build_metric_at_x(Accuracy, 'Accuracy', 'multiclass', num_classes=self.num_classes, micro=True, macro=True),
+            build_metric_at_x(Recall, 'Recall', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
+            build_metric_at_x(Precision, 'Precision', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
+            build_metric_at_x(F1Score, 'F1', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
+            build_metric_at_x(Accuracy, 'Accuracy', 'multiclass', num_classes=self.num_classes, micro=True, macro=True),
             postfix='_Main'
         )
         self.main_test_metrics = main_metrics.clone('Test/')
@@ -113,10 +113,10 @@ class ClassificationModel(LightningModule):
         prc_name = metrics.prefix + 'PRCurve'
 
         metrics_dict = metrics.compute()
-        metrics_dict[auroc_name] = self.aggregate_AUROC(metrics_dict[auroc_name])
+        metrics_dict[auroc_name] = aggregate_AUROC(metrics_dict[auroc_name])
 
         preds = torch.sigmoid(torch.concat(logits))
-        metrics_dict |= self.compute_all_metrics(metrics_dict[prc_name], preds, torch.concat(labels), metrics.prefix)
+        metrics_dict |= compute_all_metrics(metrics_dict[prc_name], preds, torch.concat(labels), metrics.prefix)
 
         # Remove PRCurve data, since it can't be logged easily
         self.logger.log_metrics(metrics_dict, self.global_step)
@@ -156,112 +156,3 @@ class ClassificationModel(LightningModule):
         }
 
         return [optimizer], [scheduler]
-
-    top_ks = [1, 3, 5, 10, 20, 30, 50]
-
-    def build_metric_at_x(self, metric_cls, name, *args, micro: bool = False, macro: bool = False, **kwargs):
-        if not micro and not macro:
-            return {name: metric_cls(*args, **kwargs)} | {f'{name}@{k}': metric_cls(*args, **kwargs, top_k=k) for k in self.top_ks}
-        else:
-            metrics = {}
-
-            if micro:
-                metrics |= self.build_metric_at_x(metric_cls, f'Micro{name}', *args, **kwargs, average='micro')
-            if macro:
-                metrics |= self.build_metric_at_x(metric_cls, f'Macro{name}', *args, **kwargs, average='macro')
-
-            return metrics
-
-
-    def compute_thresholds_and_tuned_macro(self, pr_curve_results: tensor, num_labels: int) -> (tensor, dict[str, tensor]):
-        precision_per_class = torch.empty(num_labels)
-        recall_per_class = torch.empty(num_labels)
-        f1_per_class = torch.empty(num_labels)
-        thresholds = torch.empty(num_labels)
-
-        for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
-            f1 = 2 * p * r / (p + r)
-            f1 = torch.nan_to_num(f1, 0)
-            ix = torch.argmax(f1)
-
-            recall_per_class[i] = r[ix]
-            precision_per_class[i] = p[ix]
-            f1_per_class[i] = f1[ix]
-            thresholds[i] = t[ix]
-
-        return thresholds, {
-            'TunedMacroPrecision': precision_per_class.mean(),
-            'TunedMacroRecall': recall_per_class.mean(),
-            'TunedMacroF1': f1_per_class.mean()
-        }
-
-
-    def compute_metrics(self, predictions: tensor, labels: tensor, prefix: str = '', post_fix: str = '',
-                        average: Optional[Literal["micro", "macro", "weighted", "none"]] = 'micro'):
-        if average == 'macro':
-            tp, fp, tn, fn, sup = multilabel_stat_scores(predictions, labels, num_labels=labels.shape[-1], average=None).T
-        else:
-            tp, fp, tn, fn, sup = multilabel_stat_scores(predictions, labels, num_labels=labels.shape[-1], average=average)
-
-        precision = torch.nan_to_num(tp / (tp + fp), 0)
-        recall = torch.nan_to_num(tp / (tp + fn))
-        f1 = torch.nan_to_num(2 * precision * recall / (precision + recall))
-        results = {
-            f'{prefix}Precision{post_fix}': precision,
-            f'{prefix}Recall{post_fix}': recall,
-            f'{prefix}F1{post_fix}': f1,
-            f'{prefix}TP{post_fix}': tp,
-            f'{prefix}FP{post_fix}': fp,
-            f'{prefix}TN{post_fix}': tn,
-            f'{prefix}FN{post_fix}': fn,
-            f'{prefix}SUP{post_fix}': sup
-        }
-        if average == 'macro':
-            return {k: v.float().mean() for k, v in results.items()}
-        else:
-            return results
-
-
-    # tune logits:
-    # 0.5 / thresholds * logits
-
-    def compute_top_k(self, predictions: tensor, labels: tensor, prefix=''):
-        batch_indices = torch.arange(predictions.shape[0]).unsqueeze(1).expand(-1, max(self.top_ks))
-        preds_sorted, preds_sort_indices = predictions.sort(descending=True)
-        predictions = predictions >= 0.5
-        top_k_preds = torch.zeros_like(predictions)
-        top_k_labels = torch.zeros_like(labels)
-
-        metrics = {}
-        previous_k = 0
-        for k in self.top_ks:
-            next_batches = batch_indices[:, previous_k:k]
-            next_preds = preds_sort_indices[:, previous_k:k]
-            top_k_preds[next_batches, next_preds] = predictions[next_batches, next_preds]
-            top_k_labels[next_batches, next_preds] = labels[next_batches, next_preds]
-
-            metrics |= self.compute_metrics(top_k_preds, top_k_labels, prefix + 'Micro', post_fix=f'@{k}', average='micro')
-            metrics |= self.compute_metrics(top_k_preds, top_k_labels, prefix + 'Macro', post_fix=f'@{k}', average='macro')
-
-            previous_k = k
-
-        return metrics
-
-
-    def compute_all_metrics(self, pr_curve_results, preds, labels, prefix: str):
-        # Tuned metrics
-        thresholds, metrics = self.compute_thresholds_and_tuned_macro(pr_curve_results, labels.shape[-1])
-        metrics |= self.compute_metrics(preds >= thresholds, labels, 'TunedMicro', average='micro')
-        scaled_preds = preds * 0.5 / thresholds
-        metrics |= self.compute_top_k(scaled_preds, labels, 'Tuned')
-
-        # Not tuned metrics
-        metrics |= self.compute_metrics(preds, labels, 'Micro', average='micro')
-        metrics |= self.compute_metrics(preds, labels, 'Macro', average='macro')
-        metrics |= self.compute_top_k(preds, labels)
-
-        return {prefix + k: v for k, v in metrics.items()}
-
-
-    def aggregate_AUROC(self, auroc: tensor):
-        return auroc[auroc > 0].mean()
