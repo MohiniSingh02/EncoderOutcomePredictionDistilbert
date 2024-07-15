@@ -68,7 +68,7 @@ def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_
     if average == 'macro':
         return {k: v.float().mean() for k, v in results.items()}
     else:
-        return {k: v.float() for k, v in results.items()}
+        return results
 
 
 # tune logits:

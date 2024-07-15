@@ -119,7 +119,7 @@ class ClassificationModel(LightningModule):
         metrics_dict |= compute_all_metrics(metrics_dict[prc_name], preds, torch.concat(labels), metrics.prefix)
 
         # Remove PRCurve data, since it can't be logged easily
-        self.logger.log_metrics(metrics_dict, self.global_step)
+        self.logger.log_metrics({k: v.float() for k, v in metrics_dict.items()}, self.global_step)
 
         main_metrics_dict = main_metrics.compute()
         self.logger.log_metrics(main_metrics_dict, self.global_step)
