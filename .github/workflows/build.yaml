@@ -40,11 +40,17 @@ jobs:
           username: ${{ secrets.DOCKER_REGISTRY_USER }}
           password: ${{ secrets.DOCKER_REGISTRY_PASSPHRASE }}
 
-      - name: Extract GitHub Username and Short SHA
-        id: extract-info
+      - name: Set Variables
+        id: vars
         run: |
           echo "USERNAME=${GITHUB_ACTOR}" >> $GITHUB_ENV
-          echo "SHORT_SHA=${{ github.sha::7 }}" >> $GITHUB_ENV
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SHA=${{ github.event.pull_request.head.sha }}
+          else
+            SHA=${{ github.sha }}
+          fi
+          SHORT_SHA=${SHA:0:7}
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v4
