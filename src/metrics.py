@@ -22,10 +22,11 @@ def build_metric_at_x(metric_cls, name, *args, micro: bool = False, macro: bool 
 
 
 def compute_thresholds_and_tuned_macro(pr_curve_results: list[tensor], num_labels: int) -> (tensor, dict[str, tensor]):
-    precision_per_class = torch.empty(num_labels, device=pr_curve_results[0].device)
-    recall_per_class = torch.empty(num_labels, device=pr_curve_results[0].device)
-    f1_per_class = torch.empty(num_labels, device=pr_curve_results[0].device)
-    thresholds = torch.empty(num_labels, device=pr_curve_results[0].device)
+    device = pr_curve_results[0][0].device
+    precision_per_class = torch.empty(num_labels, device=device)
+    recall_per_class = torch.empty(num_labels, device=device)
+    f1_per_class = torch.empty(num_labels, device=device)
+    thresholds = torch.empty(num_labels, device=device)
 
     for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
         f1 = 2 * p * r / (p + r)
