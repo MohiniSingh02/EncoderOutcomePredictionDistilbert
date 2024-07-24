@@ -136,7 +136,7 @@ class ClassificationDataset(torch.utils.data.Dataset):
         self.add_null = add_null
 
     def __len__(self):
-        return 10
+        return len(self.examples)
 
     def __getitem__(self, idx):
         example = self.examples[idx]
