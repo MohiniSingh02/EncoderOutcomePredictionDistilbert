@@ -21,11 +21,8 @@ def build_metric_at_x(metric_cls, name, *args, micro: bool = False, macro: bool 
         return metrics
 
 
-def compute_thresholds_and_tuned_macro(pr_curve_results: list[tensor], num_labels: int) -> (tensor, dict[str, tensor]):
+def compute_thresholds(pr_curve_results: list[tensor], num_labels: int) -> (tensor, dict[str, tensor]):
     device = pr_curve_results[0][0].device
-    precision_per_class = torch.empty(num_labels, device=device, dtype=torch.float)
-    recall_per_class = torch.empty(num_labels, device=device, dtype=torch.float)
-    f1_per_class = torch.empty(num_labels, device=device, dtype=torch.float)
     thresholds = torch.empty(num_labels, device=device, dtype=torch.float)
 
     for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
@@ -33,17 +30,9 @@ def compute_thresholds_and_tuned_macro(pr_curve_results: list[tensor], num_label
         f1 = torch.nan_to_num(f1, 0)
         ix = torch.argmax(f1)
 
-        recall_per_class[i] = r[ix]
-        precision_per_class[i] = p[ix]
-        f1_per_class[i] = f1[ix]
         thresholds[i] = t[ix]
 
-    return thresholds, {
-        'TunedMacroPrecision': precision_per_class.mean(),
-        'TunedMacroRecall': recall_per_class.mean(),
-        'TunedMacroF1': f1_per_class.mean()
-    }
-
+    return thresholds
 
 def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_fix: str = '',
                     average: Optional[Literal["micro", "macro", "weighted", "none"]] = 'micro'):
@@ -58,6 +47,7 @@ def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_
     results = {
         f'{prefix}Precision{post_fix}': precision,
         f'{prefix}Recall{post_fix}': recall,
+        f'{prefix}Accuracy{post_fix}': (tp + tn) / (tp + tn + fp + fn),
         f'{prefix}F1{post_fix}': f1,
         f'{prefix}TP{post_fix}': tp,
         f'{prefix}FP{post_fix}': fp,
@@ -70,9 +60,6 @@ def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_
     else:
         return results
 
-
-# tune logits:
-# 0.5 / thresholds * logits
 
 def compute_top_k(predictions: tensor, labels: tensor, prefix=''):
     batch_indices = torch.arange(predictions.shape[0]).unsqueeze(1).expand(-1, max(top_ks))
@@ -99,7 +86,8 @@ def compute_top_k(predictions: tensor, labels: tensor, prefix=''):
 
 def compute_all_metrics(pr_curve_results, preds, labels, prefix: str):
     # Tuned metrics
-    thresholds, metrics = compute_thresholds_and_tuned_macro(pr_curve_results, labels.shape[-1])
+    thresholds = compute_thresholds(pr_curve_results, labels.shape[-1])
+    metrics = compute_metrics(preds >= thresholds, labels, 'TunedMacro', average='macro')
     metrics |= compute_metrics(preds >= thresholds, labels, 'TunedMicro', average='micro')
     scaled_preds = preds * 0.5 / thresholds
     metrics |= compute_top_k(scaled_preds, labels, 'Tuned')
