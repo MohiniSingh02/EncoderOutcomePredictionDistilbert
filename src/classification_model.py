@@ -127,6 +127,8 @@ class ClassificationModel(LightningModule):
 
         metrics.reset()
         main_metrics.reset()
+        logits.clear()
+        labels.clear()
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())
