@@ -101,14 +101,16 @@ class ClassificationModel(LightningModule):
         self.test_val_epoch_end(self.val_metrics, self.main_val_metrics, self.val_logits, self.val_labels)
 
     def test_val_epoch_end(self, metrics: MetricCollection, main_metrics, logits, labels) -> None:
+        tensor_labels = torch.concat(labels)
+
         auroc_name = metrics.prefix + 'AUROC'
         prc_name = metrics.prefix + 'PRCurve'
 
         metrics_dict = metrics.compute()
-        metrics_dict[auroc_name] = aggregate_AUROC(metrics_dict[auroc_name], labels)
+        metrics_dict[auroc_name] = aggregate_AUROC(metrics_dict[auroc_name], tensor_labels)
 
         preds = torch.sigmoid(torch.concat(logits))
-        metrics_dict |= compute_all_metrics(metrics_dict[prc_name], preds, torch.concat(labels), metrics.prefix)
+        metrics_dict |= compute_all_metrics(metrics_dict[prc_name], preds, tensor_labels, metrics.prefix)
 
         # Remove PRCurve data, since it can't be logged easily
         del metrics_dict[prc_name]
