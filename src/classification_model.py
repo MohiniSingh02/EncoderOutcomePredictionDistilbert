@@ -105,7 +105,7 @@ class ClassificationModel(LightningModule):
         prc_name = metrics.prefix + 'PRCurve'
 
         metrics_dict = metrics.compute()
-        metrics_dict[auroc_name] = aggregate_AUROC(metrics_dict[auroc_name])
+        metrics_dict[auroc_name] = aggregate_AUROC(metrics_dict[auroc_name], labels)
 
         preds = torch.sigmoid(torch.concat(logits))
         metrics_dict |= compute_all_metrics(metrics_dict[prc_name], preds, torch.concat(labels), metrics.prefix)

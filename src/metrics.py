@@ -101,8 +101,8 @@ def compute_all_metrics(pr_curve_results, preds, labels, prefix: str):
     return {prefix + k: v for k, v in metrics.items()}
 
 
-def aggregate_AUROC(auroc: tensor):
-    return auroc[auroc > 0].mean()
+def aggregate_AUROC(auroc: tensor, labels: tensor):
+    return auroc[labels.sum(axis=0) != 0].mean()
 
 
 if __name__ == '__main__':
