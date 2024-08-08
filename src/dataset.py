@@ -1,9 +1,7 @@
 import logging
-import random
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 import torch
 from lightning import LightningDataModule
@@ -159,7 +157,7 @@ class ClassificationDataset(torch.utils.data.Dataset):
 
 def load_data_from(path: Path, glob: str):
     files = list(path.glob(glob))
-    logging.info(f'Detected {len(files)} files for glob {glob}: {files}')
+    logging.warning(f'Detected {len(files)} files for glob {glob}: {files}')
     dfs = [pd.read_csv(file) if file.suffix == '.csv' else
            pd.read_parquet(file) if file.suffix == '.parquet' else None
            for file in files]
@@ -192,9 +190,7 @@ class MIMICClassificationDataModule(LightningDataModule):
 
         training_data = load_data_from(data_dir, '*train*')
         test_data = load_data_from(data_dir, '*test*')
-        validation_data = load_data_from(data_dir, '*dev*')
-        if len(validation_data) == 0:
-            validation_data = load_data_from(data_dir, '*val*')
+        validation_data = load_data_from(data_dir, '*val*')
 
         # build label index
         label_distribution = pd.concat([training_data.labels.explode(), validation_data.labels.explode(), test_data.labels.explode()]).value_counts()
