@@ -32,7 +32,7 @@ spec:
         - name: RUNNER_NAME
           value: "github-runner-encoder-clinical-outcome"
         - name: RUNNER_TOKEN
-          value: "AGZVGAT72A7VVMADGUGJ2E3GR6ZN4"
+          value: "AGZVGATRNVUATZ7DRJUQLITGUT2GM"
         - name: RUNNER_REPOSITORY_URL
           value: "https://github.com/DATEXIS/EncoderOutcomePrediction"
         - name: RUNNER_WORK_DIRECTORY

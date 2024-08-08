@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: encoder-outcome-prediction
+  name: encoder-outcome-prediction-new-metrics
   labels:
     app: encoder-outcome-prediction
 spec:
@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:723cc53
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:new-metrics
           command: [
               "python", "classification_main.py",
               "fit",

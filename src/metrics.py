@@ -27,12 +27,13 @@ def compute_thresholds(pr_curve_results: list[tensor], num_labels: int) -> (tens
 
     for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
         f1 = 2 * p * r / (p + r)
-        f1 = torch.nan_to_num(f1, 0)
-        ix = torch.argmax(f1)
+        f1 = torch.nan_to_num(f1, 1)
+        max_f1, ix = torch.max(f1, 0)
 
-        thresholds[i] = t[ix]
+        thresholds[i] = t[-1] + 1e-7 if max_f1 == 0 else t[ix]
 
     return thresholds
+
 
 def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_fix: str = '',
                     average: Optional[Literal["micro", "macro", "weighted", "none"]] = 'micro'):
@@ -41,9 +42,9 @@ def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_
     else:
         tp, fp, tn, fn, sup = multilabel_stat_scores(predictions, labels, num_labels=labels.shape[-1], average=average)
 
-    precision = torch.nan_to_num(tp / (tp + fp), 0)
-    recall = torch.nan_to_num(tp / (tp + fn))
-    f1 = torch.nan_to_num(2 * precision * recall / (precision + recall))
+    precision = tp / (tp + fp)
+    recall = tp / (tp + fn)
+    f1 = 2 * precision * recall / (precision + recall)
     results = {
         f'{prefix}Precision{post_fix}': precision,
         f'{prefix}Recall{post_fix}': recall,
@@ -56,7 +57,7 @@ def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_
         f'{prefix}SUP{post_fix}': sup
     }
     if average == 'macro':
-        return {k: v.float().mean() for k, v in results.items()}
+        return {k: v[~v.isnan()].float().mean() for k, v in results.items()}
     else:
         return results
 

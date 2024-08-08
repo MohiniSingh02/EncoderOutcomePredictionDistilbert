@@ -30,14 +30,6 @@ class ClassificationModel(LightningModule):
         self.num_classes = num_classes
         self.classification_layer = torch.nn.Linear(768, self.num_classes)
 
-        # Precision / Recall / AUROC
-        # multilabel
-        # Precision / Recall @ 20, 10, 5, 3, 1
-        # Precision / Recall / Accuracy @ first
-        # diagnosis @ 5, 3, 1
-        # Retrieval
-        # mAP
-
         metrics = MetricCollection(
             build_metric_at_x(RetrievalMAP, 'mAP') |
             {'AUROC': MultilabelAUROC(num_labels=self.num_classes, average=None),
