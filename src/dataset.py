@@ -165,9 +165,9 @@ def load_data_from(path: Path, glob: str):
            for file in files]
     for df in dfs:
         if 'test' in df:
-            df = df.drop(columns='test')
+            df.drop(columns='test', inplace=True)
         if 'SHORT_CODES' in df and 'labels' not in df:
-            df.rename(columns={'SHORT_CODES': 'labels'})
+            df.rename(columns={'SHORT_CODES': 'labels'}, inplace=True)
         if isinstance(df.labels.iloc[0], str):
             df.labels = df.labels.str.replace(r"[\[\]' ]", "", regex=True).str.split(",")
         df.text = df.text.str.strip()
