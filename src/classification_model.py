@@ -22,9 +22,9 @@ class ClassificationModel(LightningModule):
                  weight_decay: float = 0.01,
                  lr: float = 2e-5,
                  optimizer_name="adam",
-                 readmission_task: bool = False
                  ):
         super().__init__()
+        self.save_hyperparameters()
         self.encoder = BertModel.from_pretrained(encoder_model_name)
         self.encoder.pooler = None
         self.num_classes = num_classes
@@ -59,7 +59,6 @@ class ClassificationModel(LightningModule):
         self.weight_decay = weight_decay
         self.optimizer_name = optimizer_name
         self.lr = lr
-        self.readmission_task = readmission_task
 
     def forward(self,
                 input_ids,
