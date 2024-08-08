@@ -157,12 +157,21 @@ class ClassificationDataset(torch.utils.data.Dataset):
                 'first_code': label_ids[0]}
 
 
-def load_csvs_at(path: Path, glob: str):
+def load_data_from(path: Path, glob: str):
     files = list(path.glob(glob))
     logging.info(f'Detected {len(files)} files for glob {glob}: {files}')
-    df = pd.concat([pd.read_csv(file) for file in files])
-    df.labels = df.labels.str.replace(r"[\[\]' ]", "", regex=True).str.split(",")
-    return df
+    dfs = [pd.read_csv(file) if file.suffix == '.csv' else
+           pd.read_parquet(file) if file.suffix == '.parquet' else None
+           for file in files]
+    for df in dfs:
+        if 'test' in df:
+            df = df.drop(columns='test')
+        if 'SHORT_CODES' in df and 'labels' not in df:
+            df.rename(columns={'SHORT_CODES': 'labels'})
+        if isinstance(df.labels.iloc[0], str):
+            df.labels = df.labels.str.replace(r"[\[\]' ]", "", regex=True).str.split(",")
+        df.text = df.text.str.strip()
+    return pd.concat(dfs)
 
 
 class MIMICClassificationDataModule(LightningDataModule):
@@ -181,11 +190,11 @@ class MIMICClassificationDataModule(LightningDataModule):
                  add_null_everywhere: bool = False):
         super().__init__()
 
-        training_data = load_csvs_at(data_dir, '*train*')
-        test_data = load_csvs_at(data_dir, '*test.csv')
-        validation_data = load_csvs_at(data_dir, '*dev*')
+        training_data = load_data_from(data_dir, '*train*')
+        test_data = load_data_from(data_dir, '*test*')
+        validation_data = load_data_from(data_dir, '*dev*')
         if len(validation_data) == 0:
-            validation_data = load_csvs_at(data_dir, '*val*')
+            validation_data = load_data_from(data_dir, '*val*')
 
         # build label index
         label_distribution = pd.concat([training_data.labels.explode(), validation_data.labels.explode(), test_data.labels.explode()]).value_counts()
