@@ -172,6 +172,10 @@ def load_data_from(path: Path, glob: str):
     return pd.concat(dfs)
 
 
+def filter_empty_labels(df: pd.DataFrame) -> pd.DataFrame:
+    return df[df.labels.str.len().astype(bool)]
+
+
 class MIMICClassificationDataModule(LightningDataModule):
     def __init__(self,
                  use_code_descriptions: bool = False,
@@ -190,9 +194,9 @@ class MIMICClassificationDataModule(LightningDataModule):
         self.save_hyperparameters()
         self.data_dir = data_dir.absolute()
 
-        training_data = load_data_from(data_dir, '*train*')
-        test_data = load_data_from(data_dir, '*test*')
-        validation_data = load_data_from(data_dir, '*val*')
+        training_data = filter_empty_labels(load_data_from(data_dir, '*train*'))
+        test_data = filter_empty_labels(load_data_from(data_dir, '*test*'))
+        validation_data = filter_empty_labels(load_data_from(data_dir, '*val*'))
 
         # build label index
         label_distribution = pd.concat([training_data.labels.explode(), validation_data.labels.explode(), test_data.labels.explode()]).value_counts()
