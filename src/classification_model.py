@@ -30,10 +30,6 @@ class ClassificationModel(LightningModule):
                  optimizer_name="adam",
                  ):
         super().__init__()
-        self.save_hyperparameters({
-            'icd': extract_re_group(self.val_dataloader().dataset.data_dir, r'icd-?(\d{1,2})'),
-            'split': extract_re_group(self.val_dataloader().dataset.data_dir, r'(icu|hosp)')
-        })
 
         self.encoder = BertModel.from_pretrained(encoder_model_name)
         self.encoder.pooler = None
@@ -69,6 +65,14 @@ class ClassificationModel(LightningModule):
         self.weight_decay = weight_decay
         self.optimizer_name = optimizer_name
         self.lr = lr
+
+    def setup(self, **kwargs):
+        if self.trainer is not None and self.trainer.datamodule is not None:
+            data_module = self.trainer.datamodule
+            self.save_hyperparameters({
+                'icd': extract_re_group(str(data_module.data_dir), r'icd-?(\d{1,2})'),
+                'split': extract_re_group(str(data_module.data_dir), r'(icu|hosp)')
+            })
 
     def forward(self,
                 input_ids,

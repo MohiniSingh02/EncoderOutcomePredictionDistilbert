@@ -188,7 +188,7 @@ class MIMICClassificationDataModule(LightningDataModule):
                  add_null_everywhere: bool = False):
         super().__init__()
         self.save_hyperparameters()
-        self.data_dir = data_dir
+        self.data_dir = data_dir.absolute()
 
         training_data = load_data_from(data_dir, '*train*')
         test_data = load_data_from(data_dir, '*test*')
