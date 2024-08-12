@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: encoder-outcome-prediction-icd9-icu
+  name: encoder-outcome-prediction-icd10-icu
   labels:
     app: encoder-outcome-prediction
 spec:
@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:ae5e0dd
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:3fb9dac
           command: [
               "python", "classification_main.py",
               "fit",
@@ -22,14 +22,14 @@ spec:
               "--trainer.default_root_dir=/pvc/logs/PubMedBERT",
               "--trainer.callbacks+=EarlyStopping",
               "--trainer.callbacks.patience=10",
-              "--trainer.callbacks.mode=max",
+              "--trainer.callbacks.mode=min",
               "--trainer.callbacks.monitor=Val/Loss",
               "--trainer.callbacks+=ModelCheckpoint",
               "--trainer.callbacks.dirpath=/pvc/PubMedBERT",
               "--trainer.callbacks.filename=checkpoint",
               "--trainer.callbacks.save_top_k=1",
               "--trainer.callbacks.save_last=True",
-              "--trainer.callbacks.mode=max",
+              "--trainer.callbacks.mode=min",
               "--trainer.callbacks.monitor=Val/Loss",
               "--trainer.logger=WandbLogger",
               "--trainer.logger.project=EncoderOutcomePred",
@@ -43,7 +43,7 @@ spec:
               "--model.decay_steps=20000",
               "--model.lr=2e-5",
               "--seed_everything=42",
-              "--data.data_dir=/pvc/data/MIMIC-IV-LLM-Outcome/icd-9/icu/",
+              "--data.data_dir=/pvc/data/MIMIC-IV-LLM-Outcome/icd-10/icu/",
           ]
           env:
             - name: LANG
