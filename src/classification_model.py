@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 import torch
@@ -13,6 +14,11 @@ from transformers import BertModel
 from metrics import build_metric_at_x, compute_all_metrics, aggregate_AUROC
 
 
+def extract_re_group(input_string, pattern):
+    match = re.search(pattern, input_string)
+    return match.group(1) if match else 'not found'
+
+
 class ClassificationModel(LightningModule):
     def __init__(self,
                  num_classes: int = 1446,
@@ -25,6 +31,11 @@ class ClassificationModel(LightningModule):
                  ):
         super().__init__()
         self.save_hyperparameters()
+        self.logger.log_hyperparams({
+            'icd': extract_re_group(self.val_dataloader().dataset.data_dir, r'icd-?(\d{1,2})'),
+            'split': extract_re_group(self.val_dataloader().dataset.data_dir, r'(icu|hosp)')
+        })
+
         self.encoder = BertModel.from_pretrained(encoder_model_name)
         self.encoder.pooler = None
         self.num_classes = num_classes
