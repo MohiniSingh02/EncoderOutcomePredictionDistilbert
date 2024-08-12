@@ -143,7 +143,7 @@ class ClassificationDataset(torch.utils.data.Dataset):
         hadm_id = example['hadm_id']
 
         label_ids = [self.label_lookup[x] for x in labels]
-        label_idxs = torch.tensor([int(x) for x in label_ids])
+        label_idxs = torch.tensor([x for x in label_ids], dtype=torch.int)
         labels = torch.zeros(len(self.label_lookup), dtype=torch.float32)
         labels[label_idxs] = 1
 
