@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:3fb9dac
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:1145eb1
           command: [
               "python", "classification_main.py",
               "fit",
@@ -20,6 +20,7 @@ spec:
               "--trainer.devices=1",
               "--trainer.precision=bf16",
               "--trainer.default_root_dir=/pvc/logs/PubMedBERT",
+              "--trainer.min_epochs=30",
               "--trainer.callbacks+=EarlyStopping",
               "--trainer.callbacks.patience=10",
               "--trainer.callbacks.mode=min",
