@@ -1,4 +1,4 @@
-from typing import Optional, Literal
+from typing import Optional, Literal, Iterable
 
 import torch
 from torch import tensor
@@ -21,18 +21,15 @@ def build_metric_at_x(metric_cls, name, *args, micro: bool = False, macro: bool 
         return metrics
 
 
-def compute_thresholds(pr_curve_results: list[tensor], num_labels: int) -> (tensor, dict[str, tensor]):
-    device = pr_curve_results[0][0].device
-    thresholds = torch.empty(num_labels, device=device, dtype=torch.float)
-
+def compute_thresholds(pr_curve_results: Iterable[tensor], out_tensor: tensor) -> (tensor, dict[str, tensor]):
     for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
         f1 = 2 * p * r / (p + r)
         f1 = torch.nan_to_num(f1, 1)
         max_f1, ix = torch.max(f1, 0)
 
-        thresholds[i] = t[-1] + 1e-7 if max_f1 == 0 else t[ix]
+        out_tensor[i] = t[-1] + 1e-7 if max_f1 == 0 else t[ix]
 
-    return thresholds
+    return out_tensor
 
 
 def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_fix: str = '',
@@ -85,12 +82,13 @@ def compute_top_k(predictions: tensor, labels: tensor, prefix=''):
     return metrics
 
 
-def compute_all_metrics(pr_curve_results, preds, labels, prefix: str):
+def compute_all_metrics(preds, labels, thresholds, prefix: str):
     # Tuned metrics
-    thresholds = compute_thresholds(pr_curve_results, labels.shape[-1])
-    metrics = compute_metrics(preds >= thresholds, labels, 'TunedMacro', average='macro')
-    metrics |= compute_metrics(preds >= thresholds, labels, 'TunedMicro', average='micro')
+    # We need to do this roundabout way because torchmetrics uses preds > thresholds, therefore we'd have to decide on a lambda
+    thresholded_preds = preds >= thresholds
     scaled_preds = preds * 0.5 / thresholds
+    metrics = compute_metrics(thresholded_preds, labels, 'TunedMacro', average='macro')
+    metrics |= compute_metrics(thresholded_preds, labels, 'TunedMicro', average='micro')
     metrics |= compute_top_k(scaled_preds, labels, 'Tuned')
 
     # Not tuned metrics
@@ -125,6 +123,6 @@ if __name__ == '__main__':
     # labels = preds > 0.3
 
     pr_curve_results = multilabel_precision_recall_curve(preds, labels, num_labels=num_labels)
-    compute_all_metrics(pr_curve_results, preds, labels, 'bla/')
+    compute_all_metrics(preds, labels, pr_curve_results, 'bla/')
 
     print('done')

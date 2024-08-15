@@ -4,7 +4,7 @@ import torch
 from torchmetrics.functional.classification import multilabel_precision_recall_curve
 
 import src.metrics
-from src.metrics import compute_all_metrics
+from src.metrics import compute_all_metrics, compute_thresholds
 
 
 class TestComputeMetrics(unittest.TestCase):
@@ -21,7 +21,8 @@ class TestComputeMetrics(unittest.TestCase):
 
     def test_compute_tuned_metrics(self):
         pr_curve_result = multilabel_precision_recall_curve(self.predictions, self.labels, 3)
-        results = compute_all_metrics(pr_curve_result, self.predictions, self.labels, '')
+        thresholds = compute_thresholds(pr_curve_result, self.labels.shape[-1])
+        results = compute_all_metrics(self.predictions, self.labels, thresholds, '')
 
         self.assertAlmostEqual(results['MicroF1'].item(), 0.2857, 4)
         self.assertAlmostEqual(results['MacroF1'].item(), 0.4000, 4)
@@ -46,6 +47,9 @@ class TestComputeMetrics(unittest.TestCase):
 
         self.assertAlmostEqual(results['TunedMicroAccuracy'].item(), 1)
         self.assertAlmostEqual(results['TunedMacroAccuracy'].item(), 1)
+
+        self.assertTrue(all(thresholds[:2] == torch.tensor([0.4, 0.3])))
+        self.assertAlmostEqual(thresholds[2].item(), 0.5, 6)
 
 
 if __name__ == '__main__':

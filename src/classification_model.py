@@ -5,13 +5,14 @@ import torch
 import transformers
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
+from torch import tensor
 from torch.nn import BCEWithLogitsLoss
 from torchmetrics import F1Score, MetricCollection, Recall, Precision, Accuracy
 from torchmetrics.classification import MultilabelPrecisionRecallCurve, MultilabelAUROC
 from torchmetrics.retrieval import RetrievalMAP
 from transformers import BertModel
 
-from metrics import build_metric_at_x, compute_all_metrics, aggregate_AUROC
+from metrics import build_metric_at_x, compute_all_metrics, aggregate_AUROC, compute_thresholds
 
 
 def extract_re_group(input_string, pattern):
@@ -54,6 +55,7 @@ class ClassificationModel(LightningModule):
         )
         self.main_test_metrics = main_metrics.clone('Test/')
         self.main_val_metrics = main_metrics.clone('Val/')
+        self.register_buffer('thresholds', torch.empty(self.num_classes, dtype=torch.float))
 
         self.test_preds, self.test_labels = [], []
         self.val_logits, self.val_labels = [], []
@@ -98,7 +100,15 @@ class ClassificationModel(LightningModule):
         return loss
 
     def on_test_epoch_end(self) -> None:
-        self.test_val_epoch_end(self.test_metrics, self.main_test_metrics, self.test_logits, self.test_labels)
+        metrics_dict = self.test_metrics.compute()
+
+        # Remove PRCurve data, since it can't be logged easily
+        del metrics_dict['Val/PRCurve']
+
+        self.test_val_epoch_end(metrics_dict, self.main_test_metrics.compute(), self.test_logits, self.test_labels, 'Test/')
+
+        self.test_metrics.reset()
+        self.main_test_metrics.reset()
 
     def validation_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
         logits = self(batch['input_ids'], batch['attention_mask'])
@@ -111,29 +121,30 @@ class ClassificationModel(LightningModule):
         return loss
 
     def on_validation_epoch_end(self) -> None:
-        self.test_val_epoch_end(self.val_metrics, self.main_val_metrics, self.val_logits, self.val_labels)
+        metrics_dict = self.val_metrics.compute()
 
-    def test_val_epoch_end(self, metrics: MetricCollection, main_metrics, logits, labels) -> None:
+        self.thresholds = compute_thresholds(metrics_dict['Val/PRCurve'], self.thresholds)
+        # Remove PRCurve data, since it can't be logged easily
+        del metrics_dict['Val/PRCurve']
+
+        self.test_val_epoch_end(metrics_dict, self.main_val_metrics.compute(), self.val_logits, self.val_labels, 'Val/')
+
+        self.val_metrics.reset()
+        self.main_val_metrics.reset()
+
+    def test_val_epoch_end(self, metrics_dict, main_metrics_dict, logits: list[tensor], labels: list[tensor], prefix: str) -> None:
         tensor_labels = torch.concat(labels)
+        auroc_name = prefix + 'AUROC'
 
-        auroc_name = metrics.prefix + 'AUROC'
-        prc_name = metrics.prefix + 'PRCurve'
-
-        metrics_dict = metrics.compute()
         metrics_dict[auroc_name] = aggregate_AUROC(metrics_dict[auroc_name], tensor_labels)
 
         preds = torch.sigmoid(torch.concat(logits))
-        metrics_dict |= compute_all_metrics(metrics_dict[prc_name], preds, tensor_labels, metrics.prefix)
+        metrics_dict |= compute_all_metrics(preds, tensor_labels, self.thresholds, prefix)
 
-        # Remove PRCurve data, since it can't be logged easily
-        del metrics_dict[prc_name]
         self.logger.log_metrics({k: v.float() for k, v in metrics_dict.items()}, self.global_step)
 
-        main_metrics_dict = main_metrics.compute()
         self.logger.log_metrics(main_metrics_dict, self.global_step)
 
-        metrics.reset()
-        main_metrics.reset()
         logits.clear()
         labels.clear()
 
