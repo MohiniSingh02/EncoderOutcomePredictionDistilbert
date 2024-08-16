@@ -162,10 +162,11 @@ def load_data_from(path: Path, glob: str):
            pd.read_parquet(file) if file.suffix == '.parquet' else None
            for file in files]
     for df in dfs:
+        df.columns = df.columns.str.lower()
         if 'test' in df:
             df.drop(columns='test', inplace=True)
-        if 'SHORT_CODES' in df and 'labels' not in df:
-            df.rename(columns={'SHORT_CODES': 'labels'}, inplace=True)
+        if 'short_codes' in df and 'labels' not in df:
+            df.rename(columns={'short_codes': 'labels'}, inplace=True)
         if isinstance(df.labels.iloc[0], str):
             df.labels = df.labels.str.replace(r"[\[\]' ]", "", regex=True).str.split(",")
         df.text = df.text.str.strip()
