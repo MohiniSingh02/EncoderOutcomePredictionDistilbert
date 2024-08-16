@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:1145eb1
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:a8c7de5
           command: [
               "python", "classification_main.py",
               "fit",
@@ -44,7 +44,7 @@ spec:
               "--model.decay_steps=20000",
               "--model.lr=2e-5",
               "--seed_everything=42",
-              "--data.data_dir=/pvc/data/MIMIC-IV-LLM-Outcome/icd-10/hosp/",
+              "--data.data_dir=/pvc/data/mimic-iv/icd-10/hosp/",
           ]
           env:
             - name: LANG
