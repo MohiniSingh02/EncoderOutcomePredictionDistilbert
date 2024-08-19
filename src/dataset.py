@@ -77,10 +77,9 @@ class ClassificationWithDescriptionCollator:
 
 
 class ClassificationCollator:
-    def __init__(self, tokenizer: AutoTokenizer, max_seq_len: int = 512, all_examples_with_null: bool = False):
+    def __init__(self, tokenizer: AutoTokenizer, max_seq_len: int = 512):
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
-        self.all_examples_with_null = all_examples_with_null
 
     def __call__(self, data):
         admission_notes = [x['admission_note'] for x in data]
@@ -118,20 +117,12 @@ class ClassificationDataset(torch.utils.data.Dataset):
     def __init__(self,
                  examples,
                  label_lookup,
-                 label_distribution,
-                 num_codes_to_add: int = 0,
-                 sampling_strategy: str = "random",
-                 use_code_descriptions: bool = False,
-                 add_null: bool = False):
+                 label_distribution):
         # tokenize admission notes
         self.examples = examples
         self.label_lookup = label_lookup
         self.inverse_label_lookup = {v: k for k, v in label_lookup.items()}
-        self.num_codes_to_add = num_codes_to_add
         self.label_distribution = label_distribution
-        self.sampling_strategy = sampling_strategy
-        self.use_code_descriptions = use_code_descriptions
-        self.add_null = add_null
 
     def __len__(self):
         return len(self.examples)
@@ -149,8 +140,6 @@ class ClassificationDataset(torch.utils.data.Dataset):
 
         return {"admission_note": note,
                 "labels": labels,
-                # "label_idxs": annotated_labels,
-                # "code_descriptions": description_texts,
                 "hadm_id": hadm_id,
                 'first_code': label_ids[0]}
 
@@ -185,12 +174,7 @@ class MIMICClassificationDataModule(LightningDataModule):
                  eval_batch_size: int = 4,
                  tokenizer_name: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
                  num_workers: int = 0,
-                 num_codes_to_add: int = 0,
-                 num_codes_to_add_val: int = 0,
-                 sampling_strategy: str = "random",
-                 val_sampling_strategy: str = "random",
-                 max_seq_len: int = 512,
-                 add_null_everywhere: bool = False):
+                 max_seq_len: int = 512):
         super().__init__()
         self.save_hyperparameters()
         self.data_dir = data_dir.absolute()
@@ -212,44 +196,29 @@ class MIMICClassificationDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.eval_batch_size = eval_batch_size
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        self.add_null_everywhere = add_null_everywhere
         if self.use_code_descriptions:
             self.collator = ClassificationWithDescriptionCollator(self.tokenizer, max_seq_len)
         else:
-            self.collator = ClassificationCollator(self.tokenizer, max_seq_len, all_examples_with_null=self.add_null_everywhere)
+            self.collator = ClassificationCollator(self.tokenizer, max_seq_len)
 
         self.num_workers = num_workers
-        self.num_codes_to_add = num_codes_to_add
-        self.num_codes_to_add_val = num_codes_to_add_val
-        self.sampling_strategy = sampling_strategy
-        self.val_sampling_strategy = val_sampling_strategy
         self.num_labels = len(label_idx)
 
     def setup(self, stage: Optional[str] = None):
         mimic_train = ClassificationDataset(self.training_data,
                                             label_lookup=self.label_idx,
                                             label_distribution=self.distribution,
-                                            num_codes_to_add=self.num_codes_to_add,
-                                            sampling_strategy=self.sampling_strategy,
-                                            use_code_descriptions=self.use_code_descriptions,
-                                            add_null=self.add_null_everywhere
                                             )
 
         mimic_val = ClassificationDataset(self.val_data,
                                           label_lookup=self.label_idx,
                                           label_distribution=self.distribution,
-                                          num_codes_to_add=self.num_codes_to_add_val,
-                                          sampling_strategy=self.val_sampling_strategy,
-                                          use_code_descriptions=self.use_code_descriptions,
-                                          add_null=self.add_null_everywhere)
+                                          )
 
         mimic_test = ClassificationDataset(self.test_data,
                                            label_lookup=self.label_idx,
                                            label_distribution=self.distribution,
-                                           num_codes_to_add=self.num_codes_to_add_val,
-                                           sampling_strategy=self.val_sampling_strategy,
-                                           use_code_descriptions=self.use_code_descriptions,
-                                           add_null=self.add_null_everywhere)
+                                           )
         self.mimic_train = mimic_train
         self.mimic_val = mimic_val
         self.mimic_test = mimic_test
