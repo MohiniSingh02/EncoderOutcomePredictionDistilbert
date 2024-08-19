@@ -141,9 +141,7 @@ class ClassificationModel(LightningModule):
         preds = torch.sigmoid(torch.concat(logits))
         metrics_dict |= compute_all_metrics(preds, tensor_labels, self.thresholds, prefix)
 
-        self.logger.log_metrics({k: v.float() for k, v in metrics_dict.items()}, self.global_step)
-
-        self.logger.log_metrics(main_metrics_dict, self.global_step)
+        self.log_dict({k: v.float() for k, v in metrics_dict.items()} | main_metrics_dict)
 
         logits.clear()
         labels.clear()
