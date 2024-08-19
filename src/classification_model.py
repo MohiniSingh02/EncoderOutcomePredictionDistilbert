@@ -68,6 +68,8 @@ class ClassificationModel(LightningModule):
         self.optimizer_name = optimizer_name
         self.lr = lr
 
+        self.steps = 0
+
     def setup(self, **kwargs):
         if self.trainer is not None and self.trainer.datamodule is not None:
             data_module = self.trainer.datamodule
@@ -87,7 +89,12 @@ class ClassificationModel(LightningModule):
         logits = self(batch['input_ids'], batch['attention_mask'])
         loss = self.loss(logits, batch['labels'])
         self.log("Train/Loss", loss)
+        self.steps += 1
         return loss
+
+    def on_train_epoch_end(self) -> None:
+        self.log('my_steps', self.steps)
+        self.steps = 0
 
     def test_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
         logits = self(batch['input_ids'], batch['attention_mask'])
@@ -97,6 +104,7 @@ class ClassificationModel(LightningModule):
         self.main_test_metrics.update(logits, batch['first_codes'])
         self.test_logits.append(logits)
         self.test_labels.append(batch['labels'])
+        self.steps += 1
         return loss
 
     def on_test_epoch_end(self) -> None:
@@ -118,6 +126,7 @@ class ClassificationModel(LightningModule):
         self.main_val_metrics.update(logits, batch['first_codes'])
         self.val_logits.append(logits)
         self.val_labels.append(batch['labels'])
+        self.steps += 1
         return loss
 
     def on_validation_epoch_end(self) -> None:
@@ -145,6 +154,8 @@ class ClassificationModel(LightningModule):
 
         logits.clear()
         labels.clear()
+        self.log('my_steps', self.steps)
+        self.steps = 0
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())
