@@ -72,16 +72,20 @@ class ClassificationModel(LightningModule):
         self.steps = 0
 
     def setup(self, **kwargs):
-        if self.trainer is not None and self.trainer.datamodule is not None:
-            data_module = self.trainer.datamodule
-            self.save_hyperparameters({
-                'icd': extract_re_group(str(data_module.data_dir), r'icd-?(\d{1,2})'),
-                'split': extract_re_group(str(data_module.data_dir), r'(icu|hosp)')
-            })
+        if self.trainer is not None:
+            checkpoint_callback = self.trainer.checkpoint_callback
+            if checkpoint_callback:
+                checkpoint_callback.CHECKPOINT_NAME_LAST = 'lastckpt_' + checkpoint_callback.filename
+                print(checkpoint_callback.CHECKPOINT_NAME_LAST)
 
-    def forward(self,
-                input_ids,
-                attention_mask):
+            if self.trainer.datamodule is not None:
+                data_module = self.trainer.datamodule
+                self.save_hyperparameters({
+                    'icd': extract_re_group(str(data_module.data_dir), r'icd-?(\d{1,2})'),
+                    'split': extract_re_group(str(data_module.data_dir), r'(icu|hosp)')
+                })
+
+    def forward(self, input_ids, attention_mask):
         encoded = self.encoder(input_ids, attention_mask, return_dict=True)['last_hidden_state'][:, 0]
         logits = self.classification_layer(encoded)
         return logits
