@@ -31,6 +31,7 @@ class ClassificationModel(LightningModule):
                  optimizer_name="adam",
                  ):
         super().__init__()
+        self.save_hyperparameters()
 
         self.encoder = BertModel.from_pretrained(encoder_model_name)
         self.encoder.pooler = None
