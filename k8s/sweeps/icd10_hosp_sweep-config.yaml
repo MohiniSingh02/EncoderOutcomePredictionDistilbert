@@ -1,0 +1,51 @@
+command:
+  - ${env}
+  - "python"
+  - "classification_main.py"
+  - "fit"
+  - "--trainer.accelerator=gpu"
+  - "--trainer.devices=1"
+  - "--trainer.precision=bf16-mixed"
+  - "--trainer.default_root_dir=/pvc/logs/icd10-hosp"
+  - "--trainer.max_epochs=100"
+  - "--trainer.num_sanity_val_steps=0"
+  - "--trainer.log_every_n_steps=10"
+  - "--trainer.callbacks+=EarlyStopping"
+  - "--trainer.callbacks.patience=10"
+  - "--trainer.callbacks.mode=max"
+  - "--trainer.callbacks.monitor=Val/AUROC"
+  - "--trainer.callbacks+=ModelCheckpoint"
+  - "--trainer.callbacks.dirpath=/model-pvc/icd10-hosp"
+  - "--trainer.callbacks.filename=epoch={epoch}-valauroc={Val/AUROC:.2f}"
+  - "--trainer.callbacks.auto_insert_metric_name=False"
+  - "--trainer.callbacks.save_top_k=1"
+  - "--trainer.callbacks.save_last=True"
+  - "--trainer.callbacks.mode=max"
+  - "--trainer.callbacks.monitor=Val/AUROC"
+  - "--trainer.logger=WandbLogger"
+  - "--trainer.logger.project=EncoderOutcomePred"
+  - "--data.num_workers=16"
+  - "--data.eval_batch_size=128"
+  - "--data.tokenizer=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+  - "--data.data_dir=/pvc/data/mimic-iv/icd-10/hosp/"
+  - "--model.encoder_model_name=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+  - "--seed_everything=42"
+  - ${args}
+method: bayes
+metric:
+  name: Val/AUROC
+  goal: maximize
+parameters:
+  model:
+    parameters:
+      lr:
+        min: 1e-6
+        max: 1e-4
+      warmup_steps:
+        values: [100, 150, 200, 250]
+      decay_steps:
+        values: [10000, 20000, 30000]
+  data:
+    parameters:
+      batch_size:
+        values: [16, 32, 64, 128]

@@ -9,3 +9,17 @@ spec:
     requests:
       storage: 20Gi
   storageClassName: shared
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: eod-model-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: shared

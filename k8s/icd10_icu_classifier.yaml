@@ -12,21 +12,21 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:a8c7de5
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:c03b128
           command: [
             "python", "classification_main.py",
             "fit",
             "--trainer.accelerator=gpu",
             "--trainer.devices=1",
             "--trainer.precision=bf16",
-            "--trainer.default_root_dir=/pvc/logs/PubMedBERT",
+            "--trainer.default_root_dir=/pvc/logs/icd10-icu",
             "--trainer.min_epochs=30",
             "--trainer.callbacks+=EarlyStopping",
             "--trainer.callbacks.patience=10",
             "--trainer.callbacks.mode=min",
             "--trainer.callbacks.monitor=Val/Loss",
             "--trainer.callbacks+=ModelCheckpoint",
-            "--trainer.callbacks.dirpath=/pvc/PubMedBERT",
+            "--trainer.callbacks.dirpath=/pvc/icd10-icu",
             "--trainer.callbacks.filename=checkpoint",
             "--trainer.callbacks.save_top_k=1",
             "--trainer.callbacks.save_last=True",
