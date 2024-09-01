@@ -5,15 +5,16 @@ import torch
 
 
 def rename_ckpt_files(directory):
-    # Iterate over all files in the directory
-    for filename in os.listdir(directory):
-        # Check if the file ends with '.ckpt'
-        if filename.endswith('.ckpt'):
-            path = os.path.join(directory, filename)
-            ckpt = torch.load(os.path.join(directory, filename))
-            ckpt['hyper_parameters']['num_classes'] = len(ckpt['state_dict']['thresholds'])
-            torch.save(ckpt, path)
-            logging.warning(f"Fixed: {filename} -> {ckpt['hyper_parameters']['num_classes']}")
+    # Walk through the directory, including all subdirectories
+    for root, _, files in os.walk(directory):
+        for filename in files:
+            # Check if the file ends with '.ckpt'
+            if filename.endswith('.ckpt'):
+                path = os.path.join(root, filename)
+                ckpt = torch.load(path)
+                ckpt['hyper_parameters']['num_classes'] = len(ckpt['state_dict']['thresholds'])
+                torch.save(ckpt, path)
+                logging.warning(f"Fixed: {filename} -> {ckpt['hyper_parameters']['num_classes']}")
 
 
 if __name__ == "__main__":
