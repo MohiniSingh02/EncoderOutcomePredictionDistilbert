@@ -102,7 +102,7 @@ class ClassificationCollator:
                                                           batch_first=True,
                                                           padding_value=0)
 
-        query_idces = torch.arange(batch_size).repeat_interleave(num_labels).view([batch_size, num_labels])
+        query_idces = torch.tensor([x['first_code'] for x in data]).unsqueeze(1).expand(batch_size, num_labels)
 
         return {"input_ids": input_ids,
                 "attention_mask": attention_masks,
@@ -125,7 +125,7 @@ class ClassificationDataset(torch.utils.data.Dataset):
         self.label_distribution = label_distribution
 
     def __len__(self):
-        return len(self.examples)
+        return 20
 
     def __getitem__(self, idx):
         example = self.examples[idx]
@@ -138,10 +138,12 @@ class ClassificationDataset(torch.utils.data.Dataset):
         labels = torch.zeros(len(self.label_lookup), dtype=torch.float32)
         labels[label_idxs] = 1
 
-        return {"admission_note": note,
-                "labels": labels,
-                "hadm_id": hadm_id,
-                'first_code': label_ids[0]}
+        return {'admission_note': note,
+                'labels': labels,
+                'hadm_id': hadm_id,
+                'first_code': label_ids[0],
+                'idx': idx
+                }
 
 
 def load_data_from(path: Path, glob: str):
@@ -184,7 +186,8 @@ class MIMICClassificationDataModule(LightningDataModule):
         validation_data = filter_empty_labels(load_data_from(data_dir, '*val*'))
 
         # build label index
-        label_distribution = pd.concat([training_data.labels.explode(), validation_data.labels.explode(), test_data.labels.explode()]).value_counts()
+        label_distribution = pd.concat([training_data.labels.explode(), validation_data.labels.explode(),
+                                        test_data.labels.explode()]).value_counts()
         label_idx = label_distribution.reset_index().labels.reset_index().set_index('labels')['index'].to_dict()
 
         self.training_data = training_data.to_dict('records')

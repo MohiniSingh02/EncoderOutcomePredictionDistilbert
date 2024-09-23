@@ -5,14 +5,15 @@ import torch
 import transformers
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
-from torch import tensor
+from torch import tensor, sigmoid
 from torch.nn import BCEWithLogitsLoss
 from torchmetrics import F1Score, MetricCollection, Recall, Precision, Accuracy
-from torchmetrics.classification import MultilabelPrecisionRecallCurve, MultilabelAUROC
-from torchmetrics.retrieval import RetrievalMAP
+from torchmetrics.classification import MultilabelPrecisionRecallCurve, MultilabelStatScores
+from torchmetrics.retrieval import RetrievalMAP, RetrievalPrecision, RetrievalRecall, RetrievalAUROC
 from transformers import BertModel
 
-from metrics import build_metric_at_x, compute_all_metrics, aggregate_AUROC, compute_thresholds
+from metrics import build_metric_at_x, compute_thresholds, MultilabelSkipAUROC
+from src.metrics import stat_metrics_to_table
 
 
 def extract_re_group(input_string, pattern):
@@ -38,28 +39,20 @@ class ClassificationModel(LightningModule):
         self.num_classes = num_classes
         self.classification_layer = torch.nn.Linear(768, self.num_classes)
 
-        metrics = MetricCollection(
-            build_metric_at_x(RetrievalMAP, 'mAP') |
-            {'AUROC': MultilabelAUROC(num_labels=self.num_classes, average=None),
-             'PRCurve': MultilabelPrecisionRecallCurve(num_labels=self.num_classes)
-             }
-        )
+        self.pr_curve = MultilabelPrecisionRecallCurve(num_labels=self.num_classes)
+        metrics = self.create_metrics()
         self.test_metrics = metrics.clone('Test/')
+        self.tuned_test_metrics = metrics.clone('Test/Tuned')
         self.val_metrics = metrics.clone('Val/')
+        self.tuned_val_metrics = metrics.clone('Val/Tuned')
 
-        main_metrics = MetricCollection(
-            build_metric_at_x(Recall, 'Recall', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
-            build_metric_at_x(Precision, 'Precision', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
-            build_metric_at_x(F1Score, 'F1', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
-            build_metric_at_x(Accuracy, 'Accuracy', 'multiclass', num_classes=self.num_classes, micro=True, macro=True),
-            postfix='_Main'
-        )
+        main_metrics = self.create_main_diagnosis_metrics()
         self.main_test_metrics = main_metrics.clone('Test/')
         self.main_val_metrics = main_metrics.clone('Val/')
-        self.register_buffer('thresholds', torch.empty(self.num_classes, dtype=torch.float))
 
+        self.register_buffer('thresholds', torch.empty(self.num_classes, dtype=torch.float))
         self.test_preds, self.test_labels = [], []
-        self.val_logits, self.val_labels = [], []
+        self.val_preds, self.val_labels = [], []
 
         self.loss = BCEWithLogitsLoss()
 
@@ -69,7 +62,26 @@ class ClassificationModel(LightningModule):
         self.optimizer_name = optimizer_name
         self.lr = lr
 
-        self.steps = 0
+    def create_metrics(self):
+        return MetricCollection(
+            build_metric_at_x(RetrievalMAP, 'mAP') |
+            build_metric_at_x(RetrievalRecall, 'Recall') |
+            build_metric_at_x(RetrievalPrecision, 'Precision') |
+            build_metric_at_x(RetrievalAUROC, 'AUROC', empty_target_action='skip') |
+            {'AUROC': MultilabelSkipAUROC(num_labels=self.num_classes),
+             'MacroStats': MultilabelStatScores(num_labels=self.num_classes, average='macro'),
+             'MicroStats': MultilabelStatScores(num_labels=self.num_classes, average='micro')},
+        )
+
+    def create_main_diagnosis_metrics(self):
+        return MetricCollection(
+            build_metric_at_x(Recall, 'Recall', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
+            build_metric_at_x(Precision, 'Precision', 'multiclass', num_classes=self.num_classes, micro=True,
+                              macro=True) |
+            build_metric_at_x(F1Score, 'F1', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
+            build_metric_at_x(Accuracy, 'Accuracy', 'multiclass', num_classes=self.num_classes, micro=True, macro=True),
+            postfix='_Main'
+        )
 
     def setup(self, **kwargs):
         if self.trainer is not None:
@@ -94,73 +106,67 @@ class ClassificationModel(LightningModule):
         logits = self(batch['input_ids'], batch['attention_mask'])
         loss = self.loss(logits, batch['labels'])
         self.log("Train/Loss", loss)
-        self.steps += 1
-        self.log('my_steps', self.steps, on_step=True, on_epoch=True)
         return loss
-
-    def on_train_epoch_end(self) -> None:
-        self.steps = 0
 
     def test_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
         logits = self(batch['input_ids'], batch['attention_mask'])
+
         loss = self.loss(logits, batch['labels'])
         self.log("Test/Loss", loss)
-        self.test_metrics.update(logits, batch['labels'].long(), indexes=batch['query_idces'])
-        self.main_test_metrics.update(logits, batch['first_codes'])
-        self.test_logits.append(logits)
-        self.test_labels.append(batch['labels'])
-        self.steps += 1
+
+        preds = sigmoid(logits)
+        targets = batch['labels'].long()
+
+        self.test_metrics.update(preds, targets, indexes=batch['query_idces'])
+        self.main_test_metrics.update(preds, batch['first_codes'])
+
+        self.test_preds.append(preds)
+        self.test_labels.append(targets)
+
         return loss
-
-    def on_test_epoch_end(self) -> None:
-        metrics_dict = self.test_metrics.compute()
-
-        # Remove PRCurve data, since it can't be logged easily
-        del metrics_dict['Val/PRCurve']
-
-        self.test_val_epoch_end(metrics_dict, self.main_test_metrics.compute(), self.test_logits, self.test_labels, 'Test/')
-
-        self.test_metrics.reset()
-        self.main_test_metrics.reset()
 
     def validation_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
         logits = self(batch['input_ids'], batch['attention_mask'])
+
         loss = self.loss(logits, batch['labels'])
         self.log("Val/Loss", loss)
-        self.val_metrics.update(logits, batch['labels'].long(), indexes=batch['query_idces'])
-        self.main_val_metrics.update(logits, batch['first_codes'])
-        self.val_logits.append(logits)
-        self.val_labels.append(batch['labels'])
-        self.steps += 1
-        self.log('my_val_steps', self.steps, on_step=True, on_epoch=True)
+
+        preds = sigmoid(logits)
+        targets = batch['labels'].long()
+
+        self.pr_curve.update(preds, targets)
+        self.val_metrics.update(preds, targets, indexes=batch['query_idces'])
+        self.main_val_metrics.update(preds, batch['first_codes'])
+
+        self.val_preds.append(preds)
+        self.val_labels.append(targets)
+
         return loss
 
+    def on_test_epoch_end(self) -> None:
+        self.test_val_epoch_end(self.test_metrics, self.main_test_metrics, self.tuned_test_metrics,
+                                self.test_preds, self.test_labels)
+
     def on_validation_epoch_end(self) -> None:
-        metrics_dict = self.val_metrics.compute()
+        self.thresholds = compute_thresholds(self.pr_curve.compute(), self.thresholds)
+        self.test_val_epoch_end(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics,
+                                self.val_preds, self.val_labels)
 
-        self.thresholds = compute_thresholds(metrics_dict['Val/PRCurve'], self.thresholds)
-        # Remove PRCurve data, since it can't be logged easily
-        del metrics_dict['Val/PRCurve']
+    def test_val_epoch_end(self, metrics: MetricCollection, main_metrics: MetricCollection,
+                           tuned_metrics: MetricCollection, preds: list[tensor], labels: list[tensor]) -> None:
+        scaled_preds = torch.concat(preds) * 0.5 / self.thresholds
+        indexes = torch.arange(len(scaled_preds)).unsqueeze(1).expand(len(scaled_preds), self.num_classes)
+        metrics_dict = metrics.compute() | main_metrics.compute() | tuned_metrics(scaled_preds, torch.concat(labels),
+                                                                                  indexes=indexes)
+        stat_metrics_to_table(metrics_dict, metrics.prefix)
+        self.log_dict(metrics_dict)
 
-        self.test_val_epoch_end(metrics_dict, self.main_val_metrics.compute(), self.val_logits, self.val_labels, 'Val/')
+        metrics.reset()
+        tuned_metrics.reset()
+        main_metrics.reset()
 
-        self.val_metrics.reset()
-        self.main_val_metrics.reset()
-
-    def test_val_epoch_end(self, metrics_dict, main_metrics_dict, logits: list[tensor], labels: list[tensor], prefix: str) -> None:
-        tensor_labels = torch.concat(labels)
-        auroc_name = prefix + 'AUROC'
-
-        metrics_dict[auroc_name] = aggregate_AUROC(metrics_dict[auroc_name], tensor_labels)
-
-        preds = torch.sigmoid(torch.concat(logits))
-        metrics_dict |= compute_all_metrics(preds, tensor_labels, self.thresholds, prefix)
-
-        self.log_dict({k: v.float() for k, v in metrics_dict.items()} | main_metrics_dict)
-
-        logits.clear()
+        preds.clear()
         labels.clear()
-        self.steps = 0
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())

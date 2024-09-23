@@ -1,15 +1,29 @@
-from typing import Optional, Literal, Iterable
+from typing import Iterable
 
 import torch
-from torch import tensor
-from torchmetrics.functional.classification import multilabel_stat_scores, multilabel_precision_recall_curve
+import wandb
+from torch import tensor, Tensor
+from torchmetrics.retrieval import RetrievalAUROC
+from wandb import Table
 
 top_ks = [1, 3, 5, 10, 20, 30, 50]
 
 
+class MultilabelSkipAUROC(RetrievalAUROC):
+    def __init__(self, num_labels):
+        super().__init__(empty_target_action='skip')
+        self.class_indices = torch.arange(0, num_labels)
+
+    def update(self, preds: Tensor, target: Tensor, **kwargs) -> None:
+        """Check shape, check and convert dtypes, flatten and add to accumulators.
+        """
+        return super().update(preds, target, self.class_indices.expand(preds.shape[0], -1))
+
+
 def build_metric_at_x(metric_cls, name, *args, micro: bool = False, macro: bool = False, **kwargs):
     if not micro and not macro:
-        return {name: metric_cls(*args, **kwargs)} | {f'{name}@{k}': metric_cls(*args, **kwargs, top_k=k) for k in top_ks}
+        return ({name: metric_cls(*args, **kwargs)} |
+                {f'{name}@{k}': metric_cls(*args, **kwargs, top_k=k) for k in top_ks})
     else:
         metrics = {}
 
@@ -23,106 +37,22 @@ def build_metric_at_x(metric_cls, name, *args, micro: bool = False, macro: bool 
 
 def compute_thresholds(pr_curve_results: Iterable[tensor], out_tensor: tensor) -> (tensor, dict[str, tensor]):
     for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
-        f1 = 2 * p * r / (p + r)
-        f1 = torch.nan_to_num(f1, 1)
-        max_f1, ix = torch.max(f1, 0)
+        # remove last entry which is just there for backwards compatibility
+        f1 = 2 * p[:-1] * r[:-1] / (p[:-1] + r[:-1])
+        f1 = torch.nan_to_num(f1, 0)
+        max_f1, ix = torch.max(f1, dim=0)
 
-        out_tensor[i] = t[-1] + 1e-7 if max_f1 == 0 else t[ix]
+        if max_f1 == 0: # if there's no successful threshold, use  at least 0.5 or the biggest and then some
+            out_tensor[i] = max(t[-1] + 1e-7, 0.5)
+        elif ix == 0: # if the first is the best use something a little lower or 0.5 if it's smaller
+            out_tensor[i] = min(t[0] - 1e-7, 0.5)
+        else: # else take the middle between the best and the previous one
+            out_tensor[i] = (t[ix - 1] + t[ix]) / 2
 
     return out_tensor
 
-
-def compute_metrics(predictions: tensor, labels: tensor, prefix: str = '', post_fix: str = '',
-                    average: Optional[Literal["micro", "macro", "weighted", "none"]] = 'micro'):
-    if average == 'macro':
-        tp, fp, tn, fn, sup = multilabel_stat_scores(predictions, labels, num_labels=labels.shape[-1], average=None).T
-    else:
-        tp, fp, tn, fn, sup = multilabel_stat_scores(predictions, labels, num_labels=labels.shape[-1], average=average)
-
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
-    f1 = 2 * precision * recall / (precision + recall)
-    results = {
-        f'{prefix}Precision{post_fix}': precision,
-        f'{prefix}Recall{post_fix}': recall,
-        f'{prefix}Accuracy{post_fix}': (tp + tn) / (tp + tn + fp + fn),
-        f'{prefix}F1{post_fix}': f1,
-        f'{prefix}TP{post_fix}': tp,
-        f'{prefix}FP{post_fix}': fp,
-        f'{prefix}TN{post_fix}': tn,
-        f'{prefix}FN{post_fix}': fn,
-        f'{prefix}SUP{post_fix}': sup
-    }
-    if average == 'macro':
-        return {k: v[~v.isnan()].float().mean() for k, v in results.items()}
-    else:
-        return results
-
-
-def compute_top_k(predictions: tensor, labels: tensor, prefix=''):
-    batch_indices = torch.arange(predictions.shape[0]).unsqueeze(1).expand(-1, max(top_ks))
-    preds_sorted, preds_sort_indices = predictions.sort(descending=True)
-    predictions = predictions >= 0.5
-    top_k_preds = torch.zeros_like(predictions)
-    top_k_labels = torch.zeros_like(labels)
-
-    metrics = {}
-    previous_k = 0
-    for k in top_ks:
-        next_batches = batch_indices[:, previous_k:k]
-        next_preds = preds_sort_indices[:, previous_k:k]
-        top_k_preds[next_batches, next_preds] = predictions[next_batches, next_preds]
-        top_k_labels[next_batches, next_preds] = labels[next_batches, next_preds]
-
-        metrics |= compute_metrics(top_k_preds, top_k_labels, prefix + 'Micro', post_fix=f'@{k}', average='micro')
-        metrics |= compute_metrics(top_k_preds, top_k_labels, prefix + 'Macro', post_fix=f'@{k}', average='macro')
-
-        previous_k = k
-
-    return metrics
-
-
-def compute_all_metrics(preds, labels, thresholds, prefix: str):
-    # Tuned metrics
-    # We need to do this roundabout way because torchmetrics uses preds > thresholds, therefore we'd have to decide on a lambda
-    thresholded_preds = preds >= thresholds
-    scaled_preds = preds * 0.5 / thresholds
-    metrics = compute_metrics(thresholded_preds, labels, 'TunedMacro', average='macro')
-    metrics |= compute_metrics(thresholded_preds, labels, 'TunedMicro', average='micro')
-    metrics |= compute_top_k(scaled_preds, labels, 'Tuned')
-
-    # Not tuned metrics
-    metrics |= compute_metrics(preds, labels, 'Micro', average='micro')
-    metrics |= compute_metrics(preds, labels, 'Macro', average='macro')
-    metrics |= compute_top_k(preds, labels)
-
-    return {prefix + k: v for k, v in metrics.items()}
-
-
-def aggregate_AUROC(auroc: tensor, labels: tensor):
-    return auroc[labels.sum(axis=0) != 0].mean()
-
-
-if __name__ == '__main__':
-    # num_labels = 3
-    # logits = torch.logit(torch.tensor([[0.75, 0.05, 0.35],
-    #                                    [0.45, 0.75, 0.05],
-    #                                    [0.05, 0.55, 0.75],
-    #                                    [0.05, 0.65, 0.05]]))
-    # labels = torch.tensor([[1, 0, 1],
-    #                        [0, 0, 0],
-    #                        [0, 1, 1],
-    #                        [1, 1, 1]])
-
-    samples = 20
-    num_labels = 50
-    logits = torch.randn([samples, num_labels])
-    labels = torch.rand([samples, num_labels]) > 0.5
-
-    preds = torch.sigmoid(logits)
-    # labels = preds > 0.3
-
-    pr_curve_results = multilabel_precision_recall_curve(preds, labels, num_labels=num_labels)
-    compute_all_metrics(preds, labels, pr_curve_results, 'bla/')
-
-    print('done')
+def stat_metrics_to_table(metrics: dict[str, tensor], prefix: str):
+    for avg in ['Micro', 'Macro', 'TunedMicro', 'TunedMacro']:
+        stats_name = f'{prefix}{avg}Stats'
+        stats = metrics.pop(stats_name)
+        wandb.log({stats_name: Table(columns=['TP', 'FP', 'TN', 'FN', 'SUP'], data=[list(stats)])})
