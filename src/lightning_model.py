@@ -6,13 +6,12 @@ import transformers
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import tensor, sigmoid
-from torch.nn import BCEWithLogitsLoss
 from torchmetrics import F1Score, MetricCollection, Recall, Precision, Accuracy
 from torchmetrics.classification import MultilabelPrecisionRecallCurve, MultilabelStatScores
 from torchmetrics.retrieval import RetrievalMAP, RetrievalPrecision, RetrievalRecall, RetrievalAUROC
-from transformers import BertModel
 
 from metrics import build_metric_at_x, compute_thresholds, MultilabelSkipAUROC
+from src.bert_model import BertForSequenceClassificationWithoutPooling
 from src.metrics import stat_metrics_to_table
 
 
@@ -34,10 +33,8 @@ class ClassificationModel(LightningModule):
         super().__init__()
         self.save_hyperparameters({'num_classes': num_classes})
 
-        self.encoder = BertModel.from_pretrained(encoder_model_name)
-        self.encoder.pooler = None
+        self.encoder = BertForSequenceClassificationWithoutPooling.from_pretrained(encoder_model_name)
         self.num_classes = num_classes
-        self.classification_layer = torch.nn.Linear(768, self.num_classes)
 
         self.pr_curve = MultilabelPrecisionRecallCurve(num_labels=self.num_classes)
         metrics = self.create_metrics()
@@ -50,11 +47,8 @@ class ClassificationModel(LightningModule):
         self.main_test_metrics = main_metrics.clone('Test/')
         self.main_val_metrics = main_metrics.clone('Val/')
 
-        self.register_buffer('thresholds', torch.empty(self.num_classes, dtype=torch.float))
         self.test_preds, self.test_labels = [], []
         self.val_preds, self.val_labels = [], []
-
-        self.loss = BCEWithLogitsLoss()
 
         self.warmup_steps = warmup_steps
         self.decay_steps = decay_steps
@@ -148,7 +142,7 @@ class ClassificationModel(LightningModule):
                                 self.test_preds, self.test_labels)
 
     def on_validation_epoch_end(self) -> None:
-        self.thresholds = compute_thresholds(self.pr_curve.compute(), self.thresholds)
+        self.encoder.tuning_weights = torch.logit(compute_thresholds(self.pr_curve.compute(), self.thresholds))
         self.test_val_epoch_end(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics,
                                 self.val_preds, self.val_labels)
 

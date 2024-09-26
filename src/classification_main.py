@@ -1,6 +1,6 @@
 from lightning.pytorch.cli import LightningCLI
 
-from classification_model import ClassificationModel
+from lightning_model import ClassificationModel
 from dataset import MIMICClassificationDataModule
 
 
