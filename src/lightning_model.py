@@ -10,7 +10,7 @@ from torchmetrics import F1Score, MetricCollection, Recall, Precision, Accuracy
 from torchmetrics.classification import MultilabelPrecisionRecallCurve, MultilabelStatScores
 from torchmetrics.retrieval import RetrievalMAP, RetrievalPrecision, RetrievalRecall, RetrievalAUROC
 
-from metrics import build_metric_at_x, compute_thresholds, MultilabelSkipAUROC
+from metrics import build_metric_at_x, compute_thresholds, MultilabelSkipAUROC, micro_and_macro
 from src.bert_model import BertForSequenceClassificationWithoutPooling
 from src.metrics import stat_metrics_to_table
 
@@ -62,6 +62,12 @@ class ClassificationModel(LightningModule):
             build_metric_at_x(RetrievalRecall, 'Recall') |
             build_metric_at_x(RetrievalPrecision, 'Precision') |
             build_metric_at_x(RetrievalAUROC, 'AUROC', empty_target_action='skip') |
+
+            micro_and_macro(Recall, 'Recall', 'multilabel', num_labels=self.num_classes) |
+            micro_and_macro(Precision, 'Precision', 'multilabel', num_labels=self.num_classes) |
+            micro_and_macro(F1Score, 'F1', 'multilabel', num_labels=self.num_classes) |
+            micro_and_macro(Accuracy, 'Accuracy', 'multilabel', num_labels=self.num_classes) |
+
             {'AUROC': MultilabelSkipAUROC(num_labels=self.num_classes),
              'MacroStats': MultilabelStatScores(num_labels=self.num_classes, average='macro'),
              'MicroStats': MultilabelStatScores(num_labels=self.num_classes, average='micro')},
@@ -69,11 +75,10 @@ class ClassificationModel(LightningModule):
 
     def create_main_diagnosis_metrics(self):
         return MetricCollection(
-            build_metric_at_x(Recall, 'Recall', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
-            build_metric_at_x(Precision, 'Precision', 'multiclass', num_classes=self.num_classes, micro=True,
-                              macro=True) |
-            build_metric_at_x(F1Score, 'F1', 'multiclass', num_classes=self.num_classes, micro=True, macro=True) |
-            build_metric_at_x(Accuracy, 'Accuracy', 'multiclass', num_classes=self.num_classes, micro=True, macro=True),
+            micro_and_macro(Recall, 'Recall', 'multiclass', num_classes=self.num_classes, at_x=True) |
+            micro_and_macro(Precision, 'Precision', 'multiclass', num_classes=self.num_classes, at_x=True) |
+            micro_and_macro(F1Score, 'F1', 'multiclass', num_classes=self.num_classes, at_x=True) |
+            micro_and_macro(Accuracy, 'Accuracy', 'multiclass', num_classes=self.num_classes, at_x=True),
             postfix='_Main'
         )
 

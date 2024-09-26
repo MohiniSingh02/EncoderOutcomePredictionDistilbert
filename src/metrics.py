@@ -20,19 +20,17 @@ class MultilabelSkipAUROC(RetrievalAUROC):
         return super().update(preds, target, self.class_indices.expand(preds.shape[0], -1))
 
 
-def build_metric_at_x(metric_cls, name, *args, micro: bool = False, macro: bool = False, **kwargs):
-    if not micro and not macro:
-        return ({name: metric_cls(*args, **kwargs)} |
-                {f'{name}@{k}': metric_cls(*args, **kwargs, top_k=k) for k in top_ks})
-    else:
-        metrics = {}
+def micro_and_macro(metric_cls, name, *args, at_x=False, **kwargs):
+    metrics = {f'Micro{name}': metric_cls(*args, **kwargs, average='micro'),
+               f'Macro{name}': metric_cls(*args, **kwargs, average='macro')}
+    if at_x:
+        metrics |= build_metric_at_x(metric_cls, f'Micro{name}', *args, **kwargs, average='micro')
+        metrics |= build_metric_at_x(metric_cls, f'Macro{name}', *args, **kwargs, average='macro')
+    return metrics
 
-        if micro:
-            metrics |= build_metric_at_x(metric_cls, f'Micro{name}', *args, **kwargs, average='micro')
-        if macro:
-            metrics |= build_metric_at_x(metric_cls, f'Macro{name}', *args, **kwargs, average='macro')
 
-        return metrics
+def build_metric_at_x(metric_cls, name, *args, **kwargs):
+    return {f'{name}@{k}': metric_cls(*args, **kwargs, top_k=k) for k in top_ks}
 
 
 def compute_thresholds(pr_curve_results: Iterable[tensor], out_tensor: tensor) -> (tensor, dict[str, tensor]):
@@ -42,14 +40,15 @@ def compute_thresholds(pr_curve_results: Iterable[tensor], out_tensor: tensor) -
         f1 = torch.nan_to_num(f1, 0)
         max_f1, ix = torch.max(f1, dim=0)
 
-        if max_f1 == 0: # if there's no successful threshold, use  at least 0.5 or the biggest and then some
+        if max_f1 == 0:  # if there's no successful threshold, use  at least 0.5 or the biggest and then some
             out_tensor[i] = max(t[-1] + 1e-7, 0.5)
-        elif ix == 0: # if the first is the best use something a little lower or 0.5 if it's smaller
+        elif ix == 0:  # if the first is the best use something a little lower or 0.5 if it's smaller
             out_tensor[i] = min(t[0] - 1e-7, 0.5)
-        else: # else take the middle between the best and the previous one
+        else:  # else take the middle between the best and the previous one
             out_tensor[i] = (t[ix - 1] + t[ix]) / 2
 
     return out_tensor
+
 
 def stat_metrics_to_table(metrics: dict[str, tensor], prefix: str):
     for avg in ['Micro', 'Macro', 'TunedMicro', 'TunedMacro']:
