@@ -5,14 +5,14 @@ import torch
 import transformers
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
-from torch import tensor, sigmoid
+from torch import sigmoid
 from torchmetrics import F1Score, MetricCollection, Recall, Precision, Accuracy
 from torchmetrics.classification import MultilabelPrecisionRecallCurve, MultilabelStatScores
 from torchmetrics.retrieval import RetrievalMAP, RetrievalPrecision, RetrievalRecall, RetrievalAUROC
 
 from metrics import build_metric_at_x, compute_thresholds, MultilabelSkipAUROC, micro_and_macro
 from src.bert_model import BertForSequenceClassificationWithoutPooling
-from src.metrics import stat_metrics_to_table
+from src.metrics import log_multi_element_tensors_as_table
 
 
 def extract_re_group(input_string, pattern):
@@ -33,7 +33,8 @@ class ClassificationModel(LightningModule):
         super().__init__()
         self.save_hyperparameters({'num_classes': num_classes})
 
-        self.encoder = BertForSequenceClassificationWithoutPooling.from_pretrained(encoder_model_name)
+        self.model = BertForSequenceClassificationWithoutPooling.from_pretrained(encoder_model_name)
+        self.forward = self.model.forward
         self.num_classes = num_classes
 
         self.pr_curve = MultilabelPrecisionRecallCurve(num_labels=self.num_classes)
@@ -47,7 +48,6 @@ class ClassificationModel(LightningModule):
         self.main_test_metrics = main_metrics.clone('Test/')
         self.main_val_metrics = main_metrics.clone('Val/')
 
-        self.test_preds, self.test_labels = [], []
         self.val_preds, self.val_labels = [], []
 
         self.warmup_steps = warmup_steps
@@ -96,41 +96,35 @@ class ClassificationModel(LightningModule):
                     'split': extract_re_group(str(data_module.data_dir), r'(icu|hosp)')
                 })
 
-    def forward(self, input_ids, attention_mask):
-        encoded = self.encoder(input_ids, attention_mask, return_dict=True)['last_hidden_state'][:, 0]
-        logits = self.classification_layer(encoded)
-        return logits
-
     def training_step(self, batch, batch_idx):
-        logits = self(batch['input_ids'], batch['attention_mask'])
-        loss = self.loss(logits, batch['labels'])
+        loss = self(batch['input_ids'], batch['attention_mask'], labels=batch['labels'])[0]
         self.log("Train/Loss", loss)
         return loss
 
     def test_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
-        logits = self(batch['input_ids'], batch['attention_mask'])
+        result = self(batch['input_ids'], batch['attention_mask'], labels=batch['labels'], return_dict=True, tuned=True)
+        self.log("Test/Loss", result['untuned_loss'])
+        self.log("Test/TunedLoss", result['loss'])
 
-        loss = self.loss(logits, batch['labels'])
-        self.log("Test/Loss", loss)
-
-        preds = sigmoid(logits)
+        preds = sigmoid(result['untuned_logits'])
+        tuned_preds = sigmoid(result['logits'])
         targets = batch['labels'].long()
 
         self.test_metrics.update(preds, targets, indexes=batch['query_idces'])
+        self.tuned_test_metrics.update(tuned_preds, targets, indexes=batch['query_idces'])
         self.main_test_metrics.update(preds, batch['first_codes'])
 
         self.test_preds.append(preds)
         self.test_labels.append(targets)
 
-        return loss
+        return result['loss']
 
     def validation_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
-        logits = self(batch['input_ids'], batch['attention_mask'])
+        result = self(batch['input_ids'], batch['attention_mask'], labels=batch['labels'], return_dict=True)
 
-        loss = self.loss(logits, batch['labels'])
-        self.log("Val/Loss", loss)
+        self.log("Val/Loss", result['loss'])
 
-        preds = sigmoid(logits)
+        preds = sigmoid(result['logits'])
         targets = batch['labels'].long()
 
         self.pr_curve.update(preds, targets)
@@ -140,32 +134,34 @@ class ClassificationModel(LightningModule):
         self.val_preds.append(preds)
         self.val_labels.append(targets)
 
-        return loss
+        return result['loss']
 
     def on_test_epoch_end(self) -> None:
-        self.test_val_epoch_end(self.test_metrics, self.main_test_metrics, self.tuned_test_metrics,
-                                self.test_preds, self.test_labels)
+        self.log_and_reset_metrics(self.test_metrics, self.main_test_metrics, self.tuned_test_metrics)
 
     def on_validation_epoch_end(self) -> None:
-        self.encoder.tuning_weights = torch.logit(compute_thresholds(self.pr_curve.compute(), self.thresholds))
-        self.test_val_epoch_end(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics,
-                                self.val_preds, self.val_labels)
+        thresholds = compute_thresholds(self.pr_curve.compute(), self.model.thresholds)
+        self.model.tuning_weights = torch.log(1 / thresholds - 1)
 
-    def test_val_epoch_end(self, metrics: MetricCollection, main_metrics: MetricCollection,
-                           tuned_metrics: MetricCollection, preds: list[tensor], labels: list[tensor]) -> None:
-        scaled_preds = torch.concat(preds) * 0.5 / self.thresholds
+        scaled_preds = torch.concat(self.val_preds) * 0.5 / self.model.thresholds
         indexes = torch.arange(len(scaled_preds)).unsqueeze(1).expand(len(scaled_preds), self.num_classes)
-        metrics_dict = metrics.compute() | main_metrics.compute() | tuned_metrics(scaled_preds, torch.concat(labels),
-                                                                                  indexes=indexes)
-        stat_metrics_to_table(metrics_dict, metrics.prefix)
+
+        self.tuned_val_metrics.update(scaled_preds, torch.concat(self.val_labels), indexes=indexes)
+        self.log_and_reset_metrics(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics)
+
+        self.val_preds.clear()
+        self.val_labels.clear()
+
+    def log_and_reset_metrics(self, *metrics: MetricCollection) -> None:
+        metrics_dict = {}
+
+        for metric in metrics:
+            computed_metric = metric.compute()
+            log_multi_element_tensors_as_table(computed_metric)
+            metrics_dict |= computed_metric
+            metric.reset()
+
         self.log_dict(metrics_dict)
-
-        metrics.reset()
-        tuned_metrics.reset()
-        main_metrics.reset()
-
-        preds.clear()
-        labels.clear()
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())

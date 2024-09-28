@@ -34,7 +34,8 @@ class TunedSequenceClassifierOutput(ModelOutput):
     logits: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-    tuned_logits: Optional[torch.FloatTensor] = None
+    untuned_loss: Optional[torch.FloatTensor] = None
+    untuned_logits: Optional[torch.FloatTensor] = None
 
 
 class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
@@ -48,22 +49,27 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
 
         self.classification_layer = torch.nn.Linear(config.hidden_size, config.num_labels)
         self.register_buffer('tuning_weights', torch.empty(config.num_labels, dtype=torch.float))
+        self.register_buffer('thresholds', torch.empty(config.num_labels, dtype=torch.float))
+
+        # hardcode these for our case
+        self.loss = BCEWithLogitsLoss()
+        self.config.problem_type = "multi_label_classification"
 
         self.post_init()
 
     def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        thresholded: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.Tensor] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            token_type_ids: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            inputs_embeds: Optional[torch.Tensor] = None,
+            labels: Optional[torch.Tensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            tuned: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], TunedSequenceClassifierOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -89,32 +95,17 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
 
         logits = self.classifier(last_state_cls_token)
 
-        tuned_logits = None
-        if thresholded:
-            tuned_logits = self.tuning_weights * logits
-
         loss = None
         if labels is not None:
-            if self.config.problem_type is None:
-                if self.num_labels == 1:
-                    self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
-                    self.config.problem_type = "single_label_classification"
-                else:
-                    self.config.problem_type = "multi_label_classification"
+            loss = self.loss(logits, labels)
 
-            if self.config.problem_type == "regression":
-                loss_fct = MSELoss()
-                if self.num_labels == 1:
-                    loss = loss_fct(logits.squeeze(), labels.squeeze())
-                else:
-                    loss = loss_fct(logits, labels)
-            elif self.config.problem_type == "single_label_classification":
-                loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            elif self.config.problem_type == "multi_label_classification":
-                loss_fct = BCEWithLogitsLoss()
-                loss = loss_fct(logits, labels)
+        untuned_logits = logits
+        untuned_loss = loss
+        if tuned:
+            logits = self.tuning_weights + logits
+            if labels is not None:
+                loss = self.loss(logits, labels)
+
         if not return_dict:
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
@@ -124,5 +115,6 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
             logits=logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-            tuned_logits=tuned_logits,
+            untuned_loss=untuned_loss,
+            untuned_logits=untuned_logits,
         )

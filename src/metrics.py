@@ -41,17 +41,20 @@ def compute_thresholds(pr_curve_results: Iterable[tensor], out_tensor: tensor) -
         max_f1, ix = torch.max(f1, dim=0)
 
         if max_f1 == 0:  # if there's no successful threshold, use  at least 0.5 or the biggest and then some
-            out_tensor[i] = max(t[-1] + 1e-7, 0.5)
+            out_tensor[i] = max(t[-1] + 1e-6, 0.5)
         elif ix == 0:  # if the first is the best use something a little lower or 0.5 if it's smaller
-            out_tensor[i] = min(t[0] - 1e-7, 0.5)
+            out_tensor[i] = min(t[0] - 1e-6, 0.5)
         else:  # else take the middle between the best and the previous one
             out_tensor[i] = (t[ix - 1] + t[ix]) / 2
 
     return out_tensor
 
 
-def stat_metrics_to_table(metrics: dict[str, tensor], prefix: str):
-    for avg in ['Micro', 'Macro', 'TunedMicro', 'TunedMacro']:
-        stats_name = f'{prefix}{avg}Stats'
-        stats = metrics.pop(stats_name)
-        wandb.log({stats_name: Table(columns=['TP', 'FP', 'TN', 'FN', 'SUP'], data=[list(stats)])})
+def log_multi_element_tensors_as_table(metrics: dict[str, tensor]):
+    for k, v in metrics.items():
+        if v.numel() > 1:
+            if v.numel() == 5:
+                wandb.log({k: Table(columns=['TP', 'FP', 'TN', 'FN', 'SUP'], data=[list(v)])})
+                del metrics[k]
+            else:
+                raise NotImplementedError('Unknown amount of numels %d for metric %s!', v.numel(), k)
