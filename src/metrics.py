@@ -1,9 +1,9 @@
-from typing import Iterable
-
 import torch
 import wandb
 from torch import tensor, Tensor
-from torchmetrics.retrieval import RetrievalAUROC
+from torchmetrics import MetricCollection, Recall, Precision, F1Score, Accuracy
+from torchmetrics.classification import MultilabelStatScores
+from torchmetrics.retrieval import RetrievalAUROC, RetrievalMAP, RetrievalRecall, RetrievalPrecision
 from wandb import Table
 
 top_ks = [1, 3, 5, 10, 20, 30, 50]
@@ -20,6 +20,35 @@ class MultilabelSkipAUROC(RetrievalAUROC):
         return super().update(preds, target, self.class_indices.expand(preds.shape[0], -1))
 
 
+def create_metrics(num_classes):
+    return MetricCollection(
+        build_metric_at_x(RetrievalMAP, 'mAP') |
+        build_metric_at_x(RetrievalRecall, 'Recall') |
+        build_metric_at_x(RetrievalPrecision, 'Precision') |
+        build_metric_at_x(RetrievalAUROC, 'AUROC', empty_target_action='skip') |
+
+        micro_and_macro(Recall, 'Recall', 'multilabel', num_labels=num_classes) |
+        micro_and_macro(Precision, 'Precision', 'multilabel', num_labels=num_classes) |
+        micro_and_macro(F1Score, 'F1', 'multilabel', num_labels=num_classes) |
+        micro_and_macro(Accuracy, 'Accuracy', 'multilabel', num_labels=num_classes) |
+
+        {'AUROC': MultilabelSkipAUROC(num_labels=num_classes),
+         'MacroStats': MultilabelStatScores(num_labels=num_classes, average='macro'),
+         'MicroStats': MultilabelStatScores(num_labels=num_classes, average='micro')},
+    )
+
+
+def create_main_diagnosis_metrics(num_classes):
+    return MetricCollection(
+        micro_and_macro(Recall, 'Recall', 'multiclass', num_classes=num_classes, at_x=True) |
+        micro_and_macro(Precision, 'Precision', 'multiclass', num_classes=num_classes, at_x=True) |
+        micro_and_macro(F1Score, 'F1', 'multiclass', num_classes=num_classes, at_x=True) |
+        micro_and_macro(Accuracy, 'Accuracy', 'multiclass', num_classes=num_classes, at_x=True),
+        postfix='_Main'
+    )
+
+
+
 def micro_and_macro(metric_cls, name, *args, at_x=False, **kwargs):
     metrics = {f'Micro{name}': metric_cls(*args, **kwargs, average='micro'),
                f'Macro{name}': metric_cls(*args, **kwargs, average='macro')}
@@ -32,29 +61,26 @@ def micro_and_macro(metric_cls, name, *args, at_x=False, **kwargs):
 def build_metric_at_x(metric_cls, name, *args, **kwargs):
     return {f'{name}@{k}': metric_cls(*args, **kwargs, top_k=k) for k in top_ks}
 
+def merge_and_reset_metrics(*metrics: MetricCollection) -> dict[str, torch.tensor]:
+    metrics_dict = {}
 
-def compute_thresholds(pr_curve_results: Iterable[tensor], out_tensor: tensor) -> (tensor, dict[str, tensor]):
-    for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
-        # remove last entry which is just there for backwards compatibility
-        f1 = 2 * p[:-1] * r[:-1] / (p[:-1] + r[:-1])
-        f1 = torch.nan_to_num(f1, 0)
-        max_f1, ix = torch.max(f1, dim=0)
+    for metric in metrics:
+        computed_metric = metric.compute()
+        log_multi_element_tensors_as_table(computed_metric)
+        metrics_dict |= computed_metric
+        metric.reset()
 
-        if max_f1 == 0:  # if there's no successful threshold, use  at least 0.5 or the biggest and then some
-            out_tensor[i] = max(t[-1] + 1e-6, 0.5)
-        elif ix == 0:  # if the first is the best use something a little lower or 0.5 if it's smaller
-            out_tensor[i] = min(t[0] - 1e-6, 0.5)
-        else:  # else take the middle between the best and the previous one
-            out_tensor[i] = (t[ix - 1] + t[ix]) / 2
-
-    return out_tensor
+    return metrics_dict
 
 
 def log_multi_element_tensors_as_table(metrics: dict[str, tensor]):
+    to_delete = []
     for k, v in metrics.items():
         if v.numel() > 1:
             if v.numel() == 5:
                 wandb.log({k: Table(columns=['TP', 'FP', 'TN', 'FN', 'SUP'], data=[list(v)])})
-                del metrics[k]
+                to_delete.append(k)
             else:
                 raise NotImplementedError('Unknown amount of numels %d for metric %s!', v.numel(), k)
+    for k in to_delete:
+        del metrics[k]

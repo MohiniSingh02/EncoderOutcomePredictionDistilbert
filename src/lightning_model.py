@@ -6,13 +6,12 @@ import transformers
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import sigmoid
-from torchmetrics import F1Score, MetricCollection, Recall, Precision, Accuracy
-from torchmetrics.classification import MultilabelPrecisionRecallCurve, MultilabelStatScores
-from torchmetrics.retrieval import RetrievalMAP, RetrievalPrecision, RetrievalRecall, RetrievalAUROC
+from torch.nn import BCELoss
+from torchmetrics.classification import MultilabelPrecisionRecallCurve
 
-from metrics import build_metric_at_x, compute_thresholds, MultilabelSkipAUROC, micro_and_macro
 from src.bert_model import BertForSequenceClassificationWithoutPooling
-from src.metrics import log_multi_element_tensors_as_table
+from src.metrics import create_metrics, create_main_diagnosis_metrics, \
+    merge_and_reset_metrics
 
 
 def extract_re_group(input_string, pattern):
@@ -33,54 +32,30 @@ class ClassificationModel(LightningModule):
         super().__init__()
         self.save_hyperparameters({'num_classes': num_classes})
 
-        self.model = BertForSequenceClassificationWithoutPooling.from_pretrained(encoder_model_name)
+        self.model = BertForSequenceClassificationWithoutPooling.from_pretrained(encoder_model_name,
+                                                                                 num_labels=num_classes)
         self.forward = self.model.forward
         self.num_classes = num_classes
 
         self.pr_curve = MultilabelPrecisionRecallCurve(num_labels=self.num_classes)
-        metrics = self.create_metrics()
+        metrics = create_metrics(self.num_classes)
         self.test_metrics = metrics.clone('Test/')
         self.tuned_test_metrics = metrics.clone('Test/Tuned')
         self.val_metrics = metrics.clone('Val/')
         self.tuned_val_metrics = metrics.clone('Val/Tuned')
 
-        main_metrics = self.create_main_diagnosis_metrics()
+        main_metrics = create_main_diagnosis_metrics(self.num_classes)
         self.main_test_metrics = main_metrics.clone('Test/')
         self.main_val_metrics = main_metrics.clone('Val/')
 
         self.val_preds, self.val_labels = [], []
+        self.val_loss = BCELoss()
 
         self.warmup_steps = warmup_steps
         self.decay_steps = decay_steps
         self.weight_decay = weight_decay
         self.optimizer_name = optimizer_name
         self.lr = lr
-
-    def create_metrics(self):
-        return MetricCollection(
-            build_metric_at_x(RetrievalMAP, 'mAP') |
-            build_metric_at_x(RetrievalRecall, 'Recall') |
-            build_metric_at_x(RetrievalPrecision, 'Precision') |
-            build_metric_at_x(RetrievalAUROC, 'AUROC', empty_target_action='skip') |
-
-            micro_and_macro(Recall, 'Recall', 'multilabel', num_labels=self.num_classes) |
-            micro_and_macro(Precision, 'Precision', 'multilabel', num_labels=self.num_classes) |
-            micro_and_macro(F1Score, 'F1', 'multilabel', num_labels=self.num_classes) |
-            micro_and_macro(Accuracy, 'Accuracy', 'multilabel', num_labels=self.num_classes) |
-
-            {'AUROC': MultilabelSkipAUROC(num_labels=self.num_classes),
-             'MacroStats': MultilabelStatScores(num_labels=self.num_classes, average='macro'),
-             'MicroStats': MultilabelStatScores(num_labels=self.num_classes, average='micro')},
-        )
-
-    def create_main_diagnosis_metrics(self):
-        return MetricCollection(
-            micro_and_macro(Recall, 'Recall', 'multiclass', num_classes=self.num_classes, at_x=True) |
-            micro_and_macro(Precision, 'Precision', 'multiclass', num_classes=self.num_classes, at_x=True) |
-            micro_and_macro(F1Score, 'F1', 'multiclass', num_classes=self.num_classes, at_x=True) |
-            micro_and_macro(Accuracy, 'Accuracy', 'multiclass', num_classes=self.num_classes, at_x=True),
-            postfix='_Main'
-        )
 
     def setup(self, **kwargs):
         if self.trainer is not None:
@@ -122,7 +97,7 @@ class ClassificationModel(LightningModule):
     def validation_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
         result = self(batch['input_ids'], batch['attention_mask'], labels=batch['labels'], return_dict=True)
 
-        self.log("Val/Loss", result['loss'])
+        self.log("Val/Loss", result['loss'], on_step=True, on_epoch=True)
 
         preds = sigmoid(result['logits'])
         targets = batch['labels'].long()
@@ -137,31 +112,24 @@ class ClassificationModel(LightningModule):
         return result['loss']
 
     def on_test_epoch_end(self) -> None:
-        self.log_and_reset_metrics(self.test_metrics, self.main_test_metrics, self.tuned_test_metrics)
+        self.log_dict(merge_and_reset_metrics(self.test_metrics, self.main_test_metrics, self.tuned_test_metrics))
 
     def on_validation_epoch_end(self) -> None:
-        thresholds = compute_thresholds(self.pr_curve.compute(), self.model.thresholds)
-        self.model.tuning_weights = torch.log(1 / thresholds - 1)
+        tensor_preds = torch.concat(self.val_preds)
+        tensor_labels = torch.concat(self.val_labels)
 
-        scaled_preds = torch.concat(self.val_preds) * 0.5 / self.model.thresholds
+        self.model.tune_thresholds(tensor_preds, tensor_labels)
+        scaled_preds = tensor_preds * 0.5 / self.model.thresholds
+
         indexes = torch.arange(len(scaled_preds)).unsqueeze(1).expand(len(scaled_preds), self.num_classes)
+        self.tuned_val_metrics.update(scaled_preds, tensor_labels, indexes=indexes)
 
-        self.tuned_val_metrics.update(scaled_preds, torch.concat(self.val_labels), indexes=indexes)
-        self.log_and_reset_metrics(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics)
+        metrics = merge_and_reset_metrics(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics)
+        metrics |= {'Val/TunedLoss_epoch': self.val_loss(tensor_preds, tensor_labels)}
+        self.log_dict(metrics)
 
         self.val_preds.clear()
         self.val_labels.clear()
-
-    def log_and_reset_metrics(self, *metrics: MetricCollection) -> None:
-        metrics_dict = {}
-
-        for metric in metrics:
-            computed_metric = metric.compute()
-            log_multi_element_tensors_as_table(computed_metric)
-            metrics_dict |= computed_metric
-            metric.reset()
-
-        self.log_dict(metrics_dict)
 
     def configure_optimizers(self):
         param_optimizer = list(self.named_parameters())

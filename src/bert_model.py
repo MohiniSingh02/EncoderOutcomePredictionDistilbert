@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from typing import Optional, Union, Tuple
 
 import torch
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from torch import tensor
+from torch.nn import BCEWithLogitsLoss
 from transformers import BertPreTrainedModel, BertConfig, BertModel
 from transformers.utils import ModelOutput
 
@@ -47,7 +48,7 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
         self.bert = BertModel(config)
         self.bert.pooler = None
 
-        self.classification_layer = torch.nn.Linear(config.hidden_size, config.num_labels)
+        self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
         self.register_buffer('tuning_weights', torch.empty(config.num_labels, dtype=torch.float))
         self.register_buffer('thresholds', torch.empty(config.num_labels, dtype=torch.float))
 
@@ -91,7 +92,7 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
             return_dict=return_dict,
         )
 
-        last_state_cls_token = outputs[2][:, 0]
+        last_state_cls_token = outputs[0][:, 0]
 
         logits = self.classifier(last_state_cls_token)
 
@@ -118,3 +119,22 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
             untuned_loss=untuned_loss,
             untuned_logits=untuned_logits,
         )
+
+    def tune_thresholds(self, preds: tensor, labels: tensor) -> (tensor, dict[str, tensor]):
+        from torchmetrics.functional.classification import multilabel_precision_recall_curve
+
+        pr_curve_results = multilabel_precision_recall_curve(preds, labels, self.num_labels)
+        for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
+            # remove last entry which is just there for backwards compatibility
+            f1 = 2 * p[:-1] * r[:-1] / (p[:-1] + r[:-1])
+            f1 = torch.nan_to_num(f1, 0)
+            max_f1, ix = torch.max(f1, dim=0)
+
+            if max_f1 == 0:  # if there's no successful threshold, use  at least 0.5 or the biggest and then some
+                self.thresholds[i] = max(t[-1] + 1e-6, 0.5)
+            elif ix == 0:  # if the first is the best use something a little lower or 0.5 if it's smaller
+                self.thresholds[i] = min(t[0] - 1e-6, 0.5)
+            else:  # else take the middle between the best and the previous one
+                self.thresholds[i] = (t[ix - 1] + t[ix]) / 2
+
+            self.tuning_weights = torch.log(1 / self.thresholds - 1)
