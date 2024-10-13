@@ -5,96 +5,21 @@ from typing import Optional
 import pandas as pd
 import torch
 from lightning import LightningDataModule
+from pandas import DataFrame
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer
-
-
-class ClassificationWithDescriptionCollator:
-    def __init__(self, tokenizer: AutoTokenizer, max_seq_len: int = 512):
-        self.tokenizer = tokenizer
-        self.max_seq_len = max_seq_len
-
-    def __call__(self, data):
-        admission_notes = [x['admission_note'] for x in data]
-        labels = torch.stack([x['labels'] for x in data])
-        code_descriptions = [x['code_descriptions'] for x in data]
-        num_descs_per_note = torch.tensor([len(x) for x in code_descriptions], dtype=torch.long)
-
-        # flatten and tokenize code_descriptions
-        # look at this cool double list comprehension no one understands and everyone has to google
-        # Here is the link for you: https://stackoverflow.com/questions/952914/how-to-make-a-flat-list-out-of-a-list-of-lists
-        code_descriptions = [item for sublist in code_descriptions for item in sublist]
-        tokenized_code_descriptions = self.tokenizer(code_descriptions,
-                                                     padding=True,
-                                                     truncation=True,
-                                                     max_length=self.max_seq_len,
-                                                     return_tensors="pt")
-
-        tokenized = self.tokenizer(admission_notes,
-                                   padding=False,
-                                   truncation=True,
-                                   max_length=self.max_seq_len,
-                                   )
-        input_ids = [torch.tensor(x) for x in tokenized["input_ids"]]
-        attention_masks = [torch.tensor(x, dtype=torch.bool) for x in tokenized["attention_mask"]]
-        lengths = torch.tensor([len(x) for x in input_ids])
-        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids,
-                                                    batch_first=True,
-                                                    padding_value=self.tokenizer.pad_token_id)
-        attention_masks = torch.nn.utils.rnn.pad_sequence(attention_masks,
-                                                          batch_first=True,
-                                                          padding_value=0)
-
-        embedding_ids = [x["label_idxs"] for x in data]
-        max_embedding_id_count = torch.max(num_descs_per_note)
-
-        embedding_id_attention_mask = torch.zeros((attention_masks.shape[0],
-                                                   attention_masks.shape[1],
-                                                   max_embedding_id_count), dtype=torch.bool)
-        for i, num_descs in enumerate(num_descs_per_note):
-            embedding_id_attention_mask[i, :, 0:num_descs] = 1
-
-        mask = torch.ones(labels.shape, dtype=torch.bool)
-        for i, id in enumerate(embedding_ids):
-            x = id - 1
-            x = x[x >= 0]
-            mask[i, x] = 0
-
-        embedding_ids = torch.nn.utils.rnn.pad_sequence(embedding_ids,
-                                                        batch_first=True,
-                                                        padding_value=0)
-
-        return {"input_ids": input_ids,
-                "attention_mask": attention_masks,
-                "labels": labels,
-                "icd_embedding_ids": embedding_ids,
-                "icd_embedding_attention_mask": embedding_id_attention_mask,
-                "lengths": lengths,
-                "code_description_tokens": tokenized_code_descriptions.input_ids,
-                "code_description_attention_masks": tokenized_code_descriptions.attention_mask,
-                "codes_per_note": num_descs_per_note,
-                "mask": mask}
+from transformers import AutoTokenizer, AutoConfig, PretrainedConfig
 
 
 class ClassificationCollator:
-    def __init__(self, tokenizer: AutoTokenizer, max_seq_len: int = 512):
-        self.tokenizer = tokenizer
-        self.max_seq_len = max_seq_len
+    def __init__(self, config: PretrainedConfig):
+        self.tokenizer = AutoTokenizer.from_pretrained(config.name_or_path, config=config)
 
     def __call__(self, data):
         admission_notes = [x['admission_note'] for x in data]
-        labels = torch.stack([x['labels'] for x in data])
-        tokenized = self.tokenizer(admission_notes,
-                                   padding=False,
-                                   truncation=True,
-                                   max_length=self.max_seq_len,
-                                   )
-        batch_size = len(data)
-        num_labels = len(data[0]['labels'])
+        tokenized = self.tokenizer(admission_notes, padding=False, truncation=True)
 
         input_ids = [torch.tensor(x) for x in tokenized["input_ids"]]
         attention_masks = [torch.tensor(x, dtype=torch.bool) for x in tokenized["attention_mask"]]
-        lengths = torch.tensor([len(x) for x in input_ids])
         input_ids = torch.nn.utils.rnn.pad_sequence(input_ids,
                                                     batch_first=True,
                                                     padding_value=self.tokenizer.pad_token_id)
@@ -102,7 +27,9 @@ class ClassificationCollator:
                                                           batch_first=True,
                                                           padding_value=0)
 
-        query_idces = torch.tensor([x['first_code'] for x in data]).unsqueeze(1).expand(batch_size, num_labels)
+        labels = torch.stack([x['labels'] for x in data])
+        lengths = torch.tensor([len(x) for x in input_ids])
+        query_idces = torch.tensor([x['first_code'] for x in data]).unsqueeze(1).expand_as(labels)
 
         return {"input_ids": input_ids,
                 "attention_mask": attention_masks,
@@ -114,15 +41,10 @@ class ClassificationCollator:
 
 
 class ClassificationDataset(torch.utils.data.Dataset):
-    def __init__(self,
-                 examples,
-                 label_lookup,
-                 label_distribution):
+    def __init__(self, examples, label2id):
         # tokenize admission notes
         self.examples = examples
-        self.label_lookup = label_lookup
-        self.inverse_label_lookup = {v: k for k, v in label_lookup.items()}
-        self.label_distribution = label_distribution
+        self.label2id = label2id
 
     def __len__(self):
         return 20
@@ -133,9 +55,9 @@ class ClassificationDataset(torch.utils.data.Dataset):
         labels = example['labels']
         hadm_id = example['hadm_id']
 
-        label_ids = [self.label_lookup[x] for x in labels]
+        label_ids = [self.label2id[x] for x in labels]
         label_idxs = torch.tensor([x for x in label_ids], dtype=torch.int)
-        labels = torch.zeros(len(self.label_lookup), dtype=torch.float32)
+        labels = torch.zeros(len(self.label2id), dtype=torch.float32)
         labels[label_idxs] = 1
 
         return {'admission_note': note,
@@ -168,63 +90,56 @@ def filter_empty_labels(df: pd.DataFrame) -> pd.DataFrame:
     return df[df.labels.str.len().astype(bool)]
 
 
+def compute_label_idx(training_data: DataFrame, validation_data: DataFrame, test_data: DataFrame):
+    training_labels = training_data.labels.explode()
+    label_distribution = pd.concat(
+        [training_labels, validation_data.labels.explode(), test_data.labels.explode()]).value_counts()
+    label_idx = label_distribution.reset_index().labels.reset_index().set_index('labels')['index'].to_dict()
+    training_label_distribution = training_labels.value_counts()
+    return label_idx, training_label_distribution
+
+
+def load_splits(data_dir):
+    return {split: filter_empty_labels(load_data_from(data_dir, f'*{split}*')) for split in ['train', 'val', 'test']}
+
+
 class MIMICClassificationDataModule(LightningDataModule):
     def __init__(self,
-                 use_code_descriptions: bool = False,
                  data_dir: Path = Path("../../data"),
                  batch_size: int = 4,
                  eval_batch_size: int = 4,
-                 tokenizer_name: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
-                 num_workers: int = 0,
-                 max_seq_len: int = 512):
+                 pretrained_model: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
+                 num_workers: int = 0):
         super().__init__()
         self.save_hyperparameters()
         self.data_dir = data_dir.absolute()
 
-        training_data = filter_empty_labels(load_data_from(data_dir, '*train*'))
-        test_data = filter_empty_labels(load_data_from(data_dir, '*test*'))
-        validation_data = filter_empty_labels(load_data_from(data_dir, '*val*'))
+        data_dfs = load_splits(self.data_dir)
+        label2id, training_distribution = compute_label_idx(data_dfs['train'], data_dfs['val'], data_dfs['test'])
+        self.data = {split_name: split.to_dict('records') for split_name, split in data_dfs.items()}
+        self.label2id = label2id
+        self.num_labels = len(label2id)
 
-        # build label index
-        label_distribution = pd.concat([training_data.labels.explode(), validation_data.labels.explode(),
-                                        test_data.labels.explode()]).value_counts()
-        label_idx = label_distribution.reset_index().labels.reset_index().set_index('labels')['index'].to_dict()
-
-        self.training_data = training_data.to_dict('records')
-        self.test_data = test_data.to_dict('records')
-        self.val_data = validation_data.to_dict('records')
-        self.use_code_descriptions = use_code_descriptions
-        self.label_idx = label_idx
-        self.distribution = torch.from_numpy(label_distribution.values)
-        self.batch_size = batch_size
-        self.eval_batch_size = eval_batch_size
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        if self.use_code_descriptions:
-            self.collator = ClassificationWithDescriptionCollator(self.tokenizer, max_seq_len)
-        else:
-            self.collator = ClassificationCollator(self.tokenizer, max_seq_len)
+        self.training_distribution = torch.from_numpy(training_distribution.values)
 
         self.num_workers = num_workers
-        self.num_labels = len(label_idx)
+        self.batch_size = batch_size
+        self.eval_batch_size = eval_batch_size
+
+        self.config = AutoConfig.from_pretrained(pretrained_model, id2label=self.label2id,
+                                                 label2id={v: k for k, v in label2id.items()},
+                                                 num_labels=self.num_labels)
+        self.collator = ClassificationCollator(self.config)
+
+        self.mimic_train, self.mimic_val, self.mimic_test = None, None, None
 
     def setup(self, stage: Optional[str] = None):
-        mimic_train = ClassificationDataset(self.training_data,
-                                            label_lookup=self.label_idx,
-                                            label_distribution=self.distribution,
-                                            )
+        if stage == "fit":
+            self.mimic_train = ClassificationDataset(self.data['train'], label2id=self.label2id)
+            self.mimic_val = ClassificationDataset(self.data['val'], label2id=self.label2id)
+        if stage == "test":
+            self.mimic_test = ClassificationDataset(self.data['test'], label2id=self.label2id)
 
-        mimic_val = ClassificationDataset(self.val_data,
-                                          label_lookup=self.label_idx,
-                                          label_distribution=self.distribution,
-                                          )
-
-        mimic_test = ClassificationDataset(self.test_data,
-                                           label_lookup=self.label_idx,
-                                           label_distribution=self.distribution,
-                                           )
-        self.mimic_train = mimic_train
-        self.mimic_val = mimic_val
-        self.mimic_test = mimic_test
         print("Val length: ", len(self.mimic_val))
         print("Train Length: ", len(self.mimic_train))
 

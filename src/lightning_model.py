@@ -10,6 +10,7 @@ from torch.nn import BCELoss
 from torchmetrics.classification import MultilabelPrecisionRecallCurve
 
 from src.bert_model import BertForSequenceClassificationWithoutPooling
+from src.dataset import MIMICClassificationDataModule
 from src.metrics import create_metrics, create_main_diagnosis_metrics, \
     merge_and_reset_metrics
 
@@ -22,7 +23,6 @@ def extract_re_group(input_string, pattern):
 class ClassificationModel(LightningModule):
     def __init__(self,
                  num_classes: int = 1446,
-                 encoder_model_name: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
                  warmup_steps: int = 0,
                  decay_steps: int = 50_000,
                  weight_decay: float = 0.01,
@@ -32,11 +32,16 @@ class ClassificationModel(LightningModule):
         super().__init__()
         self.save_hyperparameters({'num_classes': num_classes})
 
-        self.model = BertForSequenceClassificationWithoutPooling.from_pretrained(encoder_model_name,
-                                                                                 num_labels=num_classes)
-        self.forward = self.model.forward
+        self.model = None
         self.num_classes = num_classes
 
+        self.warmup_steps = warmup_steps
+        self.decay_steps = decay_steps
+        self.weight_decay = weight_decay
+        self.optimizer_name = optimizer_name
+        self.lr = lr
+
+        # Metrics
         self.pr_curve = MultilabelPrecisionRecallCurve(num_labels=self.num_classes)
         metrics = create_metrics(self.num_classes)
         self.test_metrics = metrics.clone('Test/')
@@ -51,12 +56,6 @@ class ClassificationModel(LightningModule):
         self.val_preds, self.val_labels = [], []
         self.val_loss = BCELoss()
 
-        self.warmup_steps = warmup_steps
-        self.decay_steps = decay_steps
-        self.weight_decay = weight_decay
-        self.optimizer_name = optimizer_name
-        self.lr = lr
-
     def setup(self, **kwargs):
         if self.trainer is not None:
             checkpoint_callback = self.trainer.checkpoint_callback
@@ -65,11 +64,17 @@ class ClassificationModel(LightningModule):
                 print(checkpoint_callback.CHECKPOINT_NAME_LAST)
 
             if self.trainer.datamodule is not None:
-                data_module = self.trainer.datamodule
+                data_module: MIMICClassificationDataModule = self.trainer.datamodule
                 self.save_hyperparameters({
                     'icd': extract_re_group(str(data_module.data_dir), r'icd-?(\d{1,2})'),
-                    'split': extract_re_group(str(data_module.data_dir), r'(icu|hosp)')
+                    'split': extract_re_group(str(data_module.data_dir), r'(icu|hosp)'),
+                    'encoder_model_name': data_module.config.name_or_path
                 })
+                self.model = BertForSequenceClassificationWithoutPooling.from_pretrained(
+                    data_module.config.name_or_path, config=data_module.config)
+                self.forward = self.model.forward
+            else:
+                raise NotImplementedError('Usage without Trainer and DataModule isn\'t currently intended.')
 
     def training_step(self, batch, batch_idx):
         loss = self(batch['input_ids'], batch['attention_mask'], labels=batch['labels'])[0]
@@ -125,7 +130,7 @@ class ClassificationModel(LightningModule):
         self.tuned_val_metrics.update(scaled_preds, tensor_labels, indexes=indexes)
 
         metrics = merge_and_reset_metrics(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics)
-        metrics |= {'Val/TunedLoss_epoch': self.val_loss(tensor_preds, tensor_labels)}
+        metrics |= {'Val/TunedLoss_epoch': self.val_loss(tensor_preds, tensor_labels.to(tensor_preds.dtype))}
         self.log_dict(metrics)
 
         self.val_preds.clear()
