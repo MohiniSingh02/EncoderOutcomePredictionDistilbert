@@ -3,33 +3,9 @@ command:
   - "python"
   - "classification_main.py"
   - "fit"
-  - "--trainer.accelerator=gpu"
-  - "--trainer.devices=1"
-  - "--trainer.precision=bf16-mixed"
-  - "--trainer.default_root_dir=/pvc/logs/icd9-icu"
-  - "--trainer.max_epochs=100"
-  - "--trainer.num_sanity_val_steps=0"
-  - "--trainer.log_every_n_steps=10"
-  - "--trainer.callbacks+=EarlyStopping"
-  - "--trainer.callbacks.patience=10"
-  - "--trainer.callbacks.mode=max"
-  - "--trainer.callbacks.monitor=Val/AUROC"
-  - "--trainer.callbacks+=ModelCheckpoint"
-  - "--trainer.callbacks.dirpath=/model-pvc/icd9-icu"
-  - "--trainer.callbacks.filename=epoch={epoch}-valauroc={Val/AUROC:.2f}"
-  - "--trainer.callbacks.auto_insert_metric_name=False"
-  - "--trainer.callbacks.save_top_k=1"
-  - "--trainer.callbacks.save_last=True"
-  - "--trainer.callbacks.mode=max"
-  - "--trainer.callbacks.monitor=Val/AUROC"
-  - "--trainer.logger=WandbLogger"
-  - "--trainer.logger.project=EncoderOutcomePred"
-  - "--data.num_workers=16"
-  - "--data.eval_batch_size=128"
-  - "--data.tokenizer=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+  - "--config=config.yaml"
+  - "--trainer.default_root_dir=/data-pvc/icd9-icu"
   - "--data.data_dir=/pvc/data/mimic-iv/icd-9/icu/"
-  - "--model.encoder_model_name=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
-  - "--seed_everything=42"
   - ${args}
 method: bayes
 metric:
@@ -40,11 +16,15 @@ parameters:
     parameters:
       lr:
         min: 1e-6
-        max: 1e-4
+        max: 1e-3
       warmup_steps:
-        values: [100, 150, 200, 250]
+        min: 100
+        max: 1000
+      weight_decay:
+        min: 1e-4
+        max: 0.1
       decay_steps:
-        values: [10000, 20000, 30000]
+        values: [10000, 20000, 30000, 40000, 50000]
   data:
     parameters:
       batch_size:

@@ -10,12 +10,12 @@ spec:
         - sleep
         - "3600"
       volumeMounts:
-      - mountPath: /pvc
-        name: trainingdata
+      - mountPath: /data-pvc
+        name: data
       - mountPath: /model-pvc
         name: model-pvc
     volumes:
-      - name: trainingdata
+      - name: data
         persistentVolumeClaim:
           claimName: eod-pvc
       - name: model-pvc

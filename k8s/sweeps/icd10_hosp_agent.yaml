@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: encoder-outcome-prediction-icd10-hosp-agent2
+  name: encoder-outcome-prediction-icd10-hosp-agent
   labels:
     app: encoder-outcome-prediction
 spec:
@@ -44,7 +44,7 @@ spec:
               nvidia.com/gpu: "1"
           volumeMounts:
             - name: eod-pvc
-              mountPath: /pvc
+              mountPath: /data-pvc
             - name: eod-model-pvc
               mountPath: /model-pvc
             - name: dshm
@@ -57,7 +57,7 @@ spec:
             claimName: eod-pvc
         - name: eod-model-pvc
           persistentVolumeClaim:
-            claimName: eod-model-pvc
+            claimName: large-eod-model-pvc
         - name: dshm
           emptyDir:
             medium: Memory

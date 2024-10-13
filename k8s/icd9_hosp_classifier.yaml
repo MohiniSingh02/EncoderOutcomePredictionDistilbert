@@ -12,40 +12,14 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:c03b128
-          command: [
-              "python", "classification_main.py",
-              "fit",
-              "--trainer.accelerator=gpu",
-              "--trainer.devices=1",
-              "--trainer.precision=bf16",
-              "--trainer.default_root_dir=/pvc/logs/icd9-hosp",
-              "--trainer.min_epochs=30",
-              "--trainer.callbacks+=EarlyStopping",
-              "--trainer.callbacks.patience=10",
-              "--trainer.callbacks.mode=min",
-              "--trainer.callbacks.monitor=Val/Loss",
-              "--trainer.callbacks+=ModelCheckpoint",
-              "--trainer.callbacks.dirpath=/pvc/icd9-hosp",
-              "--trainer.callbacks.filename=checkpoint",
-              "--trainer.callbacks.save_top_k=1",
-              "--trainer.callbacks.save_last=True",
-              "--trainer.callbacks.mode=min",
-              "--trainer.callbacks.monitor=Val/Loss",
-              "--trainer.logger=WandbLogger",
-              "--trainer.logger.project=EncoderOutcomePred",
-              "--trainer.logger.anonymous=True",
-              "--data.num_workers=16",
-              "--data.eval_batch_size=128",
-              "--data.batch_size=32",
-              "--data.tokenizer=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
-              "--model.encoder_model_name=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
-              "--model.warmup_steps=150",
-              "--model.decay_steps=20000",
-              "--model.lr=2e-5",
-              "--seed_everything=42",
-              "--data.data_dir=/pvc/data/mimic-iv/icd-9/hosp/",
-          ]
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:1858786
+          command:
+            - "python"
+            - "classification_main.py"
+            - "fit"
+            - "--config=config.yaml"
+            - "--trainer.default_root_dir=/data-pvc/icd9-icu"
+            - "--data.data_dir=/pvc/data/mimic-iv/icd-9/icu/"
           env:
             - name: LANG
               value: 'C.UTF-8'
@@ -72,7 +46,9 @@ spec:
               nvidia.com/gpu: "1"
           volumeMounts:
             - name: eod-pvc
-              mountPath: /pvc
+              mountPath: /data-pvc
+            - name: eod-model-pvc
+              mountPath: /model-pvc
             - name: dshm
               mountPath: /dev/shm
       nodeSelector:
@@ -81,6 +57,9 @@ spec:
         - name: eod-pvc
           persistentVolumeClaim:
             claimName: eod-pvc
+        - name: eod-model-pvc
+          persistentVolumeClaim:
+            claimName: large-eod-model-pvc
         - name: dshm
           emptyDir:
             medium: Memory

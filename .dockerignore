@@ -1,4 +1,5 @@
 venv/
+.venv/
 data/!/src/analysis.py
 src/__pycache__/
 src/simple_attention_model/__pycache__/
@@ -14,5 +15,5 @@ src/*.pickle
 src/*.ipynb
 src/iframe_figures/
 src/lightning_logs/
-src/wandb
-src/pvc
+**/wandb
+**/pvc
