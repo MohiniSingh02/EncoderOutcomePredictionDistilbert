@@ -42,11 +42,9 @@ class TunedSequenceClassifierOutput(ModelOutput):
 class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
     def __init__(self, config: BertConfig):
         super().__init__(config)
-        self.num_labels = config.num_labels
         self.config = config
 
-        self.bert = BertModel(config)
-        self.bert.pooler = None
+        self.bert = BertModel(config, add_pooling_layer=False)
 
         self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
         self.register_buffer('tuning_weights', torch.empty(config.num_labels, dtype=torch.float))
@@ -123,7 +121,7 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
     def tune_thresholds(self, preds: tensor, labels: tensor) -> (tensor, dict[str, tensor]):
         from torchmetrics.functional.classification import multilabel_precision_recall_curve
 
-        pr_curve_results = multilabel_precision_recall_curve(preds, labels, self.num_labels)
+        pr_curve_results = multilabel_precision_recall_curve(preds, labels, self.config.num_labels)
         for i, (p, r, t) in enumerate(zip(*pr_curve_results)):
             # remove last entry which is just there for backwards compatibility
             f1 = 2 * p[:-1] * r[:-1] / (p[:-1] + r[:-1])
