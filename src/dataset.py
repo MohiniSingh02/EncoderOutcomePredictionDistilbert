@@ -12,7 +12,8 @@ from transformers import AutoTokenizer, AutoConfig, PretrainedConfig
 
 class ClassificationCollator:
     def __init__(self, config: PretrainedConfig):
-        self.tokenizer = AutoTokenizer.from_pretrained(config.name_or_path, config=config)
+        self.tokenizer = AutoTokenizer.from_pretrained(config.name_or_path, config=config,
+                                                       model_max_length=config.max_position_embeddings)
 
     def __call__(self, data):
         admission_notes = [x['admission_note'] for x in data]
@@ -29,7 +30,7 @@ class ClassificationCollator:
 
         labels = torch.stack([x['labels'] for x in data])
         lengths = torch.tensor([len(x) for x in input_ids])
-        query_idces = torch.tensor([x['first_code'] for x in data]).unsqueeze(1).expand_as(labels)
+        query_idces = torch.tensor([x['first_code'] for x in data]).unsqueeze(1).expand_as(labels).contiguous()
 
         return {"input_ids": input_ids,
                 "attention_mask": attention_masks,

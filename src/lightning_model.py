@@ -94,9 +94,6 @@ class ClassificationModel(LightningModule):
         self.tuned_test_metrics.update(tuned_preds, targets, indexes=batch['query_idces'])
         self.main_test_metrics.update(preds, batch['first_codes'])
 
-        self.test_preds.append(preds)
-        self.test_labels.append(targets)
-
         return result['loss']
 
     def validation_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
@@ -126,7 +123,7 @@ class ClassificationModel(LightningModule):
         self.model.tune_thresholds(tensor_preds, tensor_labels)
         scaled_preds = tensor_preds * 0.5 / self.model.thresholds
 
-        indexes = torch.arange(len(scaled_preds)).unsqueeze(1).expand(len(scaled_preds), self.num_classes)
+        indexes = torch.arange(len(scaled_preds), device=self.device).unsqueeze(1).expand(len(scaled_preds), self.num_classes)
         self.tuned_val_metrics.update(scaled_preds, tensor_labels, indexes=indexes)
 
         metrics = merge_and_reset_metrics(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics)

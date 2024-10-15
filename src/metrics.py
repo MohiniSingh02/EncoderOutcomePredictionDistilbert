@@ -12,7 +12,7 @@ top_ks = [1, 3, 5, 10, 20, 30, 50]
 class MultilabelSkipAUROC(RetrievalAUROC):
     def __init__(self, num_labels):
         super().__init__(empty_target_action='skip')
-        self.class_indices = torch.arange(0, num_labels)
+        self.register_buffer('class_indices', torch.arange(0, num_labels))
 
     def update(self, preds: Tensor, target: Tensor, **kwargs) -> None:
         """Check shape, check and convert dtypes, flatten and add to accumulators.
