@@ -1,4 +1,3 @@
-import re
 from typing import Optional
 
 import torch
@@ -13,11 +12,6 @@ from src.bert_model import BertForSequenceClassificationWithoutPooling
 from src.dataset import MIMICClassificationDataModule
 from src.metrics import create_metrics, create_main_diagnosis_metrics, \
     merge_and_reset_metrics
-
-
-def extract_re_group(input_string, pattern):
-    match = re.search(pattern, input_string)
-    return match.group(1) if match else 'not found'
 
 
 class ClassificationModel(LightningModule):
@@ -61,13 +55,12 @@ class ClassificationModel(LightningModule):
             checkpoint_callback = self.trainer.checkpoint_callback
             if checkpoint_callback:
                 checkpoint_callback.CHECKPOINT_NAME_LAST = 'lastckpt_' + checkpoint_callback.filename
-                print(checkpoint_callback.CHECKPOINT_NAME_LAST)
 
             if self.trainer.datamodule is not None:
                 data_module: MIMICClassificationDataModule = self.trainer.datamodule
                 self.save_hyperparameters({
-                    'icd': extract_re_group(str(data_module.data_dir), r'icd-?(\d{1,2})'),
-                    'split': extract_re_group(str(data_module.data_dir), r'(icu|hosp)'),
+                    'icd': data_module.icd_version,
+                    'split': data_module.hospital_type,
                     'encoder_model_name': data_module.config.name_or_path
                 })
                 self.model = BertForSequenceClassificationWithoutPooling.from_pretrained(
@@ -123,7 +116,8 @@ class ClassificationModel(LightningModule):
         self.model.tune_thresholds(tensor_preds, tensor_labels)
         scaled_preds = tensor_preds * 0.5 / self.model.thresholds
 
-        indexes = torch.arange(len(scaled_preds), device=self.device).unsqueeze(1).expand(len(scaled_preds), self.num_classes)
+        indexes = torch.arange(len(scaled_preds), device=self.device).unsqueeze(1).expand(len(scaled_preds),
+                                                                                          self.num_classes)
         self.tuned_val_metrics.update(scaled_preds, tensor_labels, indexes=indexes)
 
         metrics = merge_and_reset_metrics(self.val_metrics, self.main_val_metrics, self.tuned_val_metrics)

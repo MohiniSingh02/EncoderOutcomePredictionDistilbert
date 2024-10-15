@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -69,6 +70,11 @@ class ClassificationDataset(torch.utils.data.Dataset):
                 }
 
 
+def extract_re_group(input_string, pattern):
+    match = re.search(pattern, input_string)
+    return match.group(1) if match else 'not found'
+
+
 def load_data_from(path: Path, glob: str):
     files = list(path.glob(glob))
     logging.warning(f'Detected {len(files)} files for glob {glob}: {files}')
@@ -87,21 +93,38 @@ def load_data_from(path: Path, glob: str):
     return pd.concat(dfs)
 
 
-def filter_empty_labels(df: pd.DataFrame) -> pd.DataFrame:
+def load_splits(data_dir, icd_version):
+    return {
+        split: preprocess(load_data_from(data_dir, f'*{split}*'), icd_version)
+        for split in ['train', 'val', 'test']
+    }
+
+
+def preprocess(df: DataFrame, truncate_to_icd_version: int) -> DataFrame:
+    filtered_empty = filter_empty_labels(df)
+    if truncate_to_icd_version is not None:
+        filtered_empty['labels'] = (
+            filtered_empty['labels'].apply(truncate_labels_9 if truncate_to_icd_version == 9 else truncate_labels_10))
+    return filtered_empty
+
+
+def filter_empty_labels(df: DataFrame) -> DataFrame:
     return df[df.labels.str.len().astype(bool)]
 
 
-def compute_label_idx(training_data: DataFrame, validation_data: DataFrame, test_data: DataFrame):
-    training_labels = training_data.labels.explode()
-    label_distribution = pd.concat(
-        [training_labels, validation_data.labels.explode(), test_data.labels.explode()]).value_counts()
+def truncate_labels_9(labels: list[str]) -> list[str]:
+    return [label[:4] if label.startswith('E') else label[:3] for label in labels]
+
+
+def truncate_labels_10(labels: list[str]) -> list[str]:
+    return [label[:3] for label in labels]
+
+
+def compute_label_idx(*dfs: DataFrame) -> dict[str, int]:
+    labels: pd.Series = pd.concat([df['labels'] for df in dfs], ignore_index=True)
+    label_distribution = labels.explode().value_counts()
     label_idx = label_distribution.reset_index().labels.reset_index().set_index('labels')['index'].to_dict()
-    training_label_distribution = training_labels.value_counts()
-    return label_idx, training_label_distribution
-
-
-def load_splits(data_dir):
-    return {split: filter_empty_labels(load_data_from(data_dir, f'*{split}*')) for split in ['train', 'val', 'test']}
+    return label_idx
 
 
 class MIMICClassificationDataModule(LightningDataModule):
@@ -110,18 +133,19 @@ class MIMICClassificationDataModule(LightningDataModule):
                  batch_size: int = 4,
                  eval_batch_size: int = 4,
                  pretrained_model: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
-                 num_workers: int = 0):
+                 num_workers: int = 0,
+                 truncate_again: bool = True):
         super().__init__()
+        self.icd_version = int(extract_re_group(str(data_dir), r'icd-?(\d{1,2})'))
+        self.hospital_type = extract_re_group(str(data_dir), r'(icu|hosp)')
         self.save_hyperparameters()
         self.data_dir = data_dir.absolute()
 
-        data_dfs = load_splits(self.data_dir)
-        label2id, training_distribution = compute_label_idx(data_dfs['train'], data_dfs['val'], data_dfs['test'])
+        data_dfs = load_splits(self.data_dir, self.icd_version if truncate_again else None)
+        label2id = compute_label_idx(*data_dfs.values())
         self.data = {split_name: split.to_dict('records') for split_name, split in data_dfs.items()}
         self.label2id = label2id
         self.num_labels = len(label2id)
-
-        self.training_distribution = torch.from_numpy(training_distribution.values)
 
         self.num_workers = num_workers
         self.batch_size = batch_size
