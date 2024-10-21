@@ -11,14 +11,14 @@ spec:
         - "3600"
       volumeMounts:
       - mountPath: /data-pvc
-        name: data
+        name: data-pvc
       - mountPath: /model-pvc
         name: model-pvc
     volumes:
-      - name: data
+      - name: data-pvc
         persistentVolumeClaim:
           claimName: eod-pvc
       - name: model-pvc
         persistentVolumeClaim:
-          claimName: eod-model-pvc
+          claimName: large-eod-model-pvc
     restartPolicy: Never

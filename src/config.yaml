@@ -73,7 +73,6 @@ trainer:
       save_on_train_epoch_end: null
       enable_version_counter: true
   fast_dev_run: false
-  max_epochs: 100
   min_epochs: null
   max_steps: -1
   min_steps: null
@@ -103,7 +102,7 @@ trainer:
   plugins: null
   sync_batchnorm: false
   reload_dataloaders_every_n_epochs: 0
-  default_root_dir: /pvc/logs/icd9-hosp
+  default_root_dir: /model-pvc/PubMedBER
 model:
   warmup_steps: 0
   decay_steps: 50000
@@ -111,8 +110,10 @@ model:
   lr: 2.0e-05
   optimizer_name: adam
 data:
+  data_dir: /data-pvc/MIMICIV/icd-10/hosp
   batch_size: 4
   eval_batch_size: 128
   pretrained_model: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
   num_workers: 16
+  truncate_again: true
 ckpt_path: null

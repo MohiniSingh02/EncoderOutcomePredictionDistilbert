@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: encoder-outcome-prediction-icd9-icu-agent
+  name: encoder-outcome-prediction-{{ icd_version }}-{{ mimic_split }}
   labels:
     app: encoder-outcome-prediction
 spec:
@@ -12,12 +12,16 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:2c034a1
-          command: [
-              "wandb", "agent",
-              "--count", "10",
-              "datexis-phd/EncoderOutcomePrediction/3fsxrlaw"
-          ]
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:{{ image_tag }}
+          command:
+            - "python"
+            - "classification_main.py"
+            - "fit"
+            - "--config=config.yaml"
+            - "--trainer.default_root_dir=/model-pvc/{{ icd_version }}-{{ mimic_split }}"
+            - "--data.data_dir=/data-pvc/data/mimic-iv/{{ icd_version }}/{{ mimic_split }}/"
+            - "--data.truncate_again={{ truncate_again }}"
+            - "--data.pretrained_model={{ model }}"
           env:
             - name: LANG
               value: 'C.UTF-8'
@@ -26,7 +30,7 @@ spec:
             - name: NCCL_DEBUG
               value: 'INFO'
             - name: HF_HOME
-              value: "/pvc/huggingface_cache"
+              value: "/model-pvc/huggingface_cache"
             - name: WANDB_ENTITY
               valueFrom:
                 secretKeyRef:
@@ -43,21 +47,21 @@ spec:
             limits:
               nvidia.com/gpu: "1"
           volumeMounts:
-            - name: eod-pvc
+            - name: data-pvc
               mountPath: /data-pvc
-            - name: eod-model-pvc
+            - name: model-pvc
               mountPath: /model-pvc
             - name: dshm
               mountPath: /dev/shm
       nodeSelector:
         gpu: a100
       volumes:
-        - name: eod-pvc
+        - name: data-pvc
           persistentVolumeClaim:
-            claimName: eod-pvc
-        - name: eod-model-pvc
+            claimName: {{ data_pvc }}
+        - name: model-pvc
           persistentVolumeClaim:
-            claimName: large-eod-model-pvc
+            claimName: {{ model_pvc }}
         - name: dshm
           emptyDir:
             medium: Memory

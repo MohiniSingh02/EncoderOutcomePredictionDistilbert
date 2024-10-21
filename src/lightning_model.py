@@ -21,7 +21,6 @@ class ClassificationModel(LightningModule):
                  decay_steps: int = 50_000,
                  weight_decay: float = 0.01,
                  lr: float = 2e-5,
-                 optimizer_name="adam",
                  ):
         super().__init__()
         self.save_hyperparameters({'num_classes': num_classes})
@@ -32,7 +31,6 @@ class ClassificationModel(LightningModule):
         self.warmup_steps = warmup_steps
         self.decay_steps = decay_steps
         self.weight_decay = weight_decay
-        self.optimizer_name = optimizer_name
         self.lr = lr
 
         # Metrics
