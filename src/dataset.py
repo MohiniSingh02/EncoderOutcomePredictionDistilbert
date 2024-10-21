@@ -49,7 +49,7 @@ class ClassificationDataset(torch.utils.data.Dataset):
         self.label2id = label2id
 
     def __len__(self):
-        return 20
+        return len(self.examples)
 
     def __getitem__(self, idx):
         example = self.examples[idx]
