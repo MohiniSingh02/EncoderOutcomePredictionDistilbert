@@ -14,7 +14,7 @@ if __name__ == '__main__':
     # Parameters
     params = dict(
         replicas=5,
-        image_tag='8fd95ed',
+        image_tag='79d3472',
         hpo_count=5,
         model='microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract',
         truncate_again=True,
