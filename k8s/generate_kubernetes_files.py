@@ -6,7 +6,6 @@ if __name__ == '__main__':
     # Load the Jinja2 template from the file system
     file_loader = FileSystemLoader('.')
     env = Environment(loader=file_loader)
-    template = env.get_template('templates/deployment.yaml.j2')
 
     versions = ['icd9', 'icd10']
     splits = ['hosp', 'icu']
@@ -14,7 +13,7 @@ if __name__ == '__main__':
     # Parameters
     params = dict(
         replicas=4,
-        image_tag='60a36c4',
+        image_tag='4a4e199',
         hpo_count=10,
         model='microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract',
         truncate_again=True,
@@ -22,7 +21,7 @@ if __name__ == '__main__':
         data_pvc='eod-pvc',
     )
 
-    template_names = ['deployment', 'sweep-config', 'single_training']
+    template_names = ['sweep-agent', 'sweep-config', 'single_training']
     for template_name in template_names:
         print(f'Creating {template_name}')
         for version in versions:

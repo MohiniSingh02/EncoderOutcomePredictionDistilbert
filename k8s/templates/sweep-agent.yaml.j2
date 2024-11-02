@@ -1,14 +1,12 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: encoder-outcome-prediction-{{ icd_version }}-{{ mimic_split }}-agent-deployment
+  name: encoder-outcome-prediction-{{ icd_version }}-{{ mimic_split }}-agent
   labels:
     app: encoder-outcome-prediction
 spec:
-  replicas: {{ replicas }}
-  selector:
-    matchLabels:
-      app: encoder-outcome-prediction
+  completions: {{ replicas }}
+  parallelism: {{ replicas }}
   template:
     metadata:
       labels:
@@ -67,4 +65,4 @@ spec:
             medium: Memory
       imagePullSecrets:
         - name: private-registry-auth
-      restartPolicy: Always
+      restartPolicy: Never
