@@ -1,7 +1,7 @@
-from dataclasses import dataclass
 from typing import Optional, Union, Tuple
 
 import torch
+from dataclasses import dataclass
 from torch import tensor
 from torch.nn import BCEWithLogitsLoss
 from transformers import BertPreTrainedModel, BertConfig, BertModel

@@ -1,8 +1,8 @@
 import torch
 from lightning.pytorch.cli import LightningCLI
 
-from lightning_model import ClassificationModel
-from dataset import MIMICClassificationDataModule
+from src.model.dataset import MIMICClassificationDataModule
+from src.model.lightning_model import ClassificationModel
 
 torch.set_float32_matmul_precision('high')
 

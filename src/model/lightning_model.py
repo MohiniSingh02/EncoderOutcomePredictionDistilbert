@@ -8,10 +8,9 @@ from torch import sigmoid
 from torch.nn import BCELoss
 from torchmetrics.classification import MultilabelPrecisionRecallCurve
 
-from bert_model import BertForSequenceClassificationWithoutPooling
-from dataset import MIMICClassificationDataModule
-from metrics import create_metrics, create_main_diagnosis_metrics, \
-    merge_and_reset_metrics
+from src.model.bert_model import BertForSequenceClassificationWithoutPooling
+from src.model.dataset import MIMICClassificationDataModule
+from src.model.metrics import create_metrics, create_main_diagnosis_metrics, merge_and_reset_metrics
 
 
 class ClassificationModel(LightningModule):
