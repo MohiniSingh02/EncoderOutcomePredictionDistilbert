@@ -4,7 +4,7 @@ import torch
 from dataclasses import dataclass
 from torch import tensor
 from torch.nn import BCEWithLogitsLoss
-from transformers import BertPreTrainedModel, BertConfig, BertModel
+from transformers import BertPreTrainedModel, BertConfig, BertModel, MegatronBertModel
 from transformers.utils import ModelOutput
 
 
@@ -44,7 +44,11 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
         super().__init__(config)
         self.config = config
 
-        self.bert = BertModel(config, add_pooling_layer=False)
+        if 'megatron' in config.model_type:
+            config._attn_implementation = 'eager'
+            self.bert = MegatronBertModel(config, add_pooling_layer=False)
+        else:
+            self.bert = BertModel(config, add_pooling_layer=False)
 
         self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
         self.register_buffer('tuning_weights', torch.empty(config.num_labels, dtype=torch.float))
