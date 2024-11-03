@@ -5,6 +5,7 @@ command:
   - "fit"
   - "--config=config.yaml"
   - "--trainer.default_root_dir=/model-pvc/{{ icd_version }}-{{ mimic_split }}"
+  - "--trainer.max_epochs=20"
   - "--data.data_dir=/data-pvc/data/mimic-iv/{{ icd_version }}/{{ mimic_split }}/"
   - "--data.truncate_again={{ truncate_again }}"
   - "--data.pretrained_model={{ model }}"
@@ -19,12 +20,14 @@ parameters:
       lr:
         min: 1e-6
         max: 1e-3
+        distribution: log_uniform
       warmup_steps:
         min: 0
-        max: 1000
+        max: 5000
       weight_decay:
         min: 1e-4
         max: 0.1
+        distribution: log_uniform
       decay_steps:
         values: [10000, 20000, 30000, 40000, 50000]
   data:

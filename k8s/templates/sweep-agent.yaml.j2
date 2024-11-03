@@ -18,7 +18,7 @@ spec:
           command: [
               "wandb", "agent",
               "--count", "{{ hpo_count }}",
-              "datexis-phd/EncoderOutcomePred/sweepid"
+              "datexis-phd/EncoderOutcomePred/{{ sweep_id }}"
           ]
           env:
             - name: LANG
