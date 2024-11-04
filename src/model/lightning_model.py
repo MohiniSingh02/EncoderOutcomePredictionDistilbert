@@ -47,7 +47,7 @@ class ClassificationModel(LightningModule):
         self.val_preds, self.val_labels = [], []
         self.val_loss = BCELoss()
 
-    def setup(self, **kwargs):
+    def setup(self, stage: Optional[str] = None):
         if self.trainer is not None:
             checkpoint_callback = self.trainer.checkpoint_callback
             if checkpoint_callback:
@@ -70,6 +70,9 @@ class ClassificationModel(LightningModule):
         loss = self(batch['input_ids'], batch['attention_mask'], labels=batch['labels'])[0]
         self.log("Train/Loss", loss)
         return loss
+
+    def predict_step(self, batch, batch_idx):
+        return self(batch['input_ids'], batch['attention_mask'], labels=batch['labels'], return_dict=True, tuned=True)
 
     def test_step(self, batch, batch_idx, **kwargs) -> Optional[STEP_OUTPUT]:
         result = self(batch['input_ids'], batch['attention_mask'], labels=batch['labels'], return_dict=True, tuned=True)

@@ -140,3 +140,12 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
                 self.thresholds[i] = (t[ix - 1] + t[ix]) / 2
 
             self.tuning_weights = torch.log(1 / self.thresholds - 1)
+
+    def get_labels_from_result(self, logits: tensor, topk: int = None):
+        if topk is None:
+            discretized_batch = logits > 0
+            indices_batch = [discretized.nonzero(as_tuple=True)[0] for discretized in discretized_batch]
+        else:
+            indices_batch = logits.topk(topk).indices
+
+        return [[self.config.id2label[index.item()] for index in indices] for indices in indices_batch]

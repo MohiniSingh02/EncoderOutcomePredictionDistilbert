@@ -35,22 +35,22 @@ class MIMICClassificationDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.eval_batch_size = eval_batch_size
 
-        self.config = AutoConfig.from_pretrained(pretrained_model, id2label=self.label2id,
-                                                 label2id={v: k for k, v in label2id.items()},
+        self.config = AutoConfig.from_pretrained(pretrained_model, label2id=self.label2id,
+                                                 id2label={v: k for k, v in label2id.items()},
                                                  num_labels=self.num_labels)
         self.collator = ClassificationCollator(self.config)
 
         self.mimic_train, self.mimic_val, self.mimic_test = None, None, None
 
     def setup(self, stage: Optional[str] = None):
-        if stage == "fit":
+        if stage == "fit" or stage is None:
             self.mimic_train = ClassificationDataset(self.data['train'], label2id=self.label2id)
             self.mimic_val = ClassificationDataset(self.data['val'], label2id=self.label2id)
-        if stage == "test":
+            print("Train Length: ", len(self.mimic_train))
+            print("Val length: ", len(self.mimic_val))
+        if stage == "test" or stage is None:
             self.mimic_test = ClassificationDataset(self.data['test'], label2id=self.label2id)
-
-        print("Val length: ", len(self.mimic_val))
-        print("Train Length: ", len(self.mimic_train))
+            print("Test length: ", len(self.mimic_test))
 
     def train_dataloader(self):
         return DataLoader(self.mimic_train,
@@ -163,7 +163,8 @@ class ClassificationCollator:
                 "labels": labels,
                 "lengths": lengths,
                 'query_idces': query_idces,
-                'first_codes': torch.tensor([x['first_code'] for x in data])
+                'first_codes': torch.tensor([x['first_code'] for x in data]),
+                'raw_labels': [x['raw_labels'] for x in data]
                 }
 
 
@@ -191,5 +192,6 @@ class ClassificationDataset(torch.utils.data.Dataset):
                 'labels': labels,
                 'hadm_id': hadm_id,
                 'first_code': label_ids[0],
-                'idx': idx
+                'idx': idx,
+                'raw_labels': example['labels']
                 }
