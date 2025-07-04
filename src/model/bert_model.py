@@ -4,7 +4,7 @@ import torch
 from dataclasses import dataclass
 from torch import tensor
 from torch.nn import BCEWithLogitsLoss
-from transformers import BertPreTrainedModel, BertConfig, BertModel, MegatronBertModel
+from transformers import DistilBertModel, DistilBertConfig, PreTrainedModel
 from transformers.utils import ModelOutput
 
 
@@ -39,18 +39,16 @@ class TunedSequenceClassifierOutput(ModelOutput):
     untuned_logits: Optional[torch.FloatTensor] = None
 
 
-class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
-    def __init__(self, config: BertConfig):
+class DistilBertForSequenceClassification(PreTrainedModel):
+    config_class = DistilBertConfig
+
+    def __init__(self, config: DistilBertConfig):
         super().__init__(config)
         self.config = config
 
-        if 'megatron' in config.model_type:
-            config._attn_implementation = 'eager'
-            self.bert = MegatronBertModel(config, add_pooling_layer=False)
-        else:
-            self.bert = BertModel(config, add_pooling_layer=False)
-
+        self.bert = DistilBertModel(config)
         self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
+
         self.register_buffer('tuning_weights', torch.empty(config.num_labels, dtype=torch.float))
         self.register_buffer('thresholds', torch.empty(config.num_labels, dtype=torch.float))
 
@@ -64,10 +62,6 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
             self,
             input_ids: Optional[torch.Tensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
-            token_type_ids: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.Tensor] = None,
-            head_mask: Optional[torch.Tensor] = None,
-            inputs_embeds: Optional[torch.Tensor] = None,
             labels: Optional[torch.Tensor] = None,
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
@@ -83,20 +77,15 @@ class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.bert(
-            input_ids,
+            input_ids=input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+            return_dict=True,
         )
 
-        last_state_cls_token = outputs[0][:, 0]
-
-        logits = self.classifier(last_state_cls_token)
+        pooled_output = outputs.last_hidden_state[:, 0]
+        logits = self.classifier(pooled_output)
 
         loss = None
         if labels is not None:

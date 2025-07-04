@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModel, BertConfig
 
-from src.model.bert_model import BertForSequenceClassificationWithoutPooling
+from src.model.bert_model import DistilBertForSequenceClassification
 from src.model.dataset import MIMICClassificationDataModule, extract_re_group, preprocess, load_data_from, \
     ClassificationCollator
 from src.model.lightning_model import ClassificationModel
@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument(
         "--pretrained_model",
         type=str,
-        default="microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
+        default="kamalkraj/distilBioBERT",
         help="Pretrained model identifier or path"
     )
     parser.add_argument(
@@ -49,7 +49,7 @@ def parse_args():
         help="Number of worker processes for data loading"
     )
     parser.add_argument(
-        "--truncate_again",
+        "--_truncate_again",
         type=bool,
         default=True,
         help="Whether to apply truncation again"
@@ -60,7 +60,7 @@ def parse_args():
 def load_data_split():
 
 
-if __name__ == "__main__":
+ if __name__ == "__main__":
     args = parse_args()
 
     data_dir = args.data_dir.absolute()
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     df = preprocess(load_data_from(data_dir, f'*{split}*'), icd_version)
 
 
-    model = BertForSequenceClassificationWithoutPooling.from_pretrained(args.pretrained_model).cuda()
+    model = DistilBertForSequenceClassification.from_pretrained(args.pretrained_model).cuda()
     ClassificationCollator(model.config)
 
     tuned_results = []

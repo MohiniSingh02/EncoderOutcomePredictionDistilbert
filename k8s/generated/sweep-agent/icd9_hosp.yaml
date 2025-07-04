@@ -1,10 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: encoder-outcome-prediction-{{ icd_version }}-{{ mimic_split }}
+  name: encoder-outcome-prediction-icd9-hosp-agent
   labels:
     app: encoder-outcome-prediction
 spec:
+  completions: 2
+  parallelism: 2
   template:
     metadata:
       labels:
@@ -12,15 +14,12 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:{{ image_tag }}
-          command:
-            - "python"
-            - "classification_main.py"
-            - "fit"
-            - "--config=config.yaml"
-            - "--trainer.default_root_dir=/model-pvc/{{ icd_version }}-{{ mimic_split }}"
-            - "--data.data_dir=/data-pvc/data/mimic-iv/{{ icd_version }}/{{ mimic_split }}/"
-            - "--data.pretrained_model={{ model }}"
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:distilbert
+          command: [
+              "wandb", "agent",
+              "--count", "10",
+              "datexis-phd/EncoderOutcomePred/5xx1yyfx"
+          ]
           env:
             - name: LANG
               value: 'C.UTF-8'
@@ -57,10 +56,10 @@ spec:
       volumes:
         - name: data-pvc
           persistentVolumeClaim:
-            claimName: {{ data_pvc }}
+            claimName: eod-pvc
         - name: model-pvc
           persistentVolumeClaim:
-            claimName: {{ model_pvc }}
+            claimName: large-eod-model-pvc
         - name: dshm
           emptyDir:
             medium: Memory

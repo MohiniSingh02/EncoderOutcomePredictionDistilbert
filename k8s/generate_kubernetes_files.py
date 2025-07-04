@@ -13,10 +13,9 @@ if __name__ == '__main__':
     # Parameters
     params = dict(
         replicas=2,
-        image_tag='4a4e199',
+        image_tag='distilbert',
         hpo_count=10,
-        # model='microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract',
-        model='UFNLP/gatortronS',
+        model='kamalkraj/distilBioBERT',
         truncate_again=True,
         model_pvc='large-eod-model-pvc',
         data_pvc='eod-pvc',
