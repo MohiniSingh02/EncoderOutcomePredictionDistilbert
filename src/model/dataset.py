@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-import self as self
 import torch
 from lightning import LightningDataModule
 from pandas import DataFrame
