@@ -18,13 +18,16 @@ class MIMICClassificationDataModule(LightningDataModule):
                  eval_batch_size: int = 4,
                  pretrained_model: str = "kamalkraj/distilBioBERT",
                  num_workers: int = 0,
-                 truncate_again: bool = False):
+                 truncate_again: bool = False,
+                 **kwargs):
         super().__init__()
         self.icd_version = int(extract_re_group(str(data_dir), r'icd-?(\d{1,2})'))
         self.hospital_type = extract_re_group(str(data_dir), r'(icu|hosp)')
-        self.save_hyperparameters("data_dir", "batch_size", "eval_batch_size", "pretrained_model", "num_workers", "truncate_again")
+        self.save_hyperparameters("data_dir", "batch_size", "eval_batch_size", "pretrained_model", "num_workers",
+                                  "truncate_again")
         self.data_dir = data_dir.absolute()
         self.truncate_again = truncate_again
+        self.kwargs = kwargs
 
         print(f"[DataModule] Truncate again: {self.truncate_again}")
         print(f"[DEBUG] Using data_dir: {self.data_dir}")
@@ -35,12 +38,11 @@ class MIMICClassificationDataModule(LightningDataModule):
         splits_icd10 = load_splits(data_dir, 10, truncate_labels=self.truncate_again)
 
         self.label2id = {'icd9': compute_label_idx(*splits_icd9.values()),
-                 'icd10': compute_label_idx(*splits_icd10.values())}
-        
-        self.num_labels = {
-        'icd9': len(self.label2id['icd9']),
-        'icd10': len(self.label2id['icd10'])
-         }
+                         'icd10': compute_label_idx(*splits_icd10.values())}
+
+        self.num_labels = {'icd9': len(self.label2id['icd9']),
+                           'icd10': len(self.label2id['icd10'])
+                           }
         # Combine data into a unified structure with task_name
         self.data = {'train': [], 'val': [], 'test': []}
         for version, splits in [('icd9', splits_icd9), ('icd10', splits_icd10)]:
@@ -126,10 +128,10 @@ def load_data_from(path: Path, glob: str):
                 df.drop(columns='test', inplace=True)
             if 'short_codes' in df and 'labels' not in df.columns:
                 df.rename(columns={'short_codes': 'labels'}, inplace=True)
-            if not df.empty  and 'labels' in df.columns and isinstance(df.labels.iloc[0], str):
+            if not df.empty and 'labels' in df.columns and isinstance(df.labels.iloc[0], str):
                 df.labels = df.labels.str.replace(r"[\[\]' ]", "", regex=True).str.split(",")
             if 'text' in df.columns:
-                    df.text = df.text.astype(str).str.strip()
+                df.text = df.text.astype(str).str.strip()
 
             dfs.append(df)
         except Exception as e:
@@ -146,7 +148,7 @@ def preprocess(df: DataFrame, truncate_to_icd_version: int) -> DataFrame:
         print(f"[INFO] Truncating to ICD-{truncate_to_icd_version}")
     else:
         print("[INFO] Skipping truncation")
-    
+
     filtered = df[df.labels.str.len().astype(bool)].copy()
     if truncate_to_icd_version is not None:
         filtered['labels'] = (
@@ -155,8 +157,8 @@ def preprocess(df: DataFrame, truncate_to_icd_version: int) -> DataFrame:
     return filtered
 
 
-#def filter_empty_labels(df: DataFrame) -> DataFrame:
-   # return df[df.labels.str.len().astype(bool)]
+# def filter_empty_labels(df: DataFrame) -> DataFrame:
+# return df[df.labels.str.len().astype(bool)]
 
 
 def truncate_labels_9(labels: list[str]) -> list[str]:
@@ -169,6 +171,7 @@ def truncate_labels_9(labels: list[str]) -> list[str]:
             continue
         clean.append(label[:4] if label.startswith('E') else label[:3])
     return clean
+
 
 def truncate_labels_10(labels: list[str]) -> list[str]:
     return [label[:3] for label in labels if isinstance(label, str) and label.strip()]
@@ -188,11 +191,12 @@ class ClassificationCollator:
 
     def __call__(self, data):
         admission_notes = [x['admission_note'] for x in data]
-        tokenized = self.tokenizer(admission_notes, padding='max_length', truncation=True, max_length=512, return_tensors='pt')
+        tokenized = self.tokenizer(admission_notes, padding='max_length', truncation=True, max_length=512,
+                                   return_tensors='pt')
 
         labels = torch.stack([x['labels'] for x in data])
         first_codes = torch.tensor([x['first_code'] for x in data])
-        query_idces = first_codes.unsqueeze(1).expand_as(labels).contiguous()
+        query_idces = torch.tensor([x['first_code'] for x in data]).unsqueeze(1).expand_as(labels).contiguous()
 
         return {"input_ids": tokenized["input_ids"],
                 "attention_mask": tokenized["attention_mask"],
@@ -220,7 +224,7 @@ class ClassificationDataset(torch.utils.data.Dataset):
         labels = example['labels']
         task = example['task_name']
         hadm_id = example['hadm_id']
-        
+
         label_map = self.label2id[task]
         label_ids = [label_map[x] for x in labels if x in label_map]
         label_tensor = torch.zeros(len(label_map), dtype=torch.float32)

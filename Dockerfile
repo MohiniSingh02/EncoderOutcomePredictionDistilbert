@@ -1,5 +1,5 @@
 FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-devel
-FROM registry.datexis.com/tsteffek/encoderoutcomeprediction:distilbert-v1
+FROM registry.datexis.com/tsteffek/encoderoutcomeprediction:distilbert
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt

@@ -1,12 +1,12 @@
-import torch
-import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import sys
+import torch
+
 from lightning.pytorch.cli import LightningCLI
+from src.model.dataset import MIMICClassificationDataModule
+from src.model.lightning_model import ClassificationModel
 
-from model.dataset import MIMICClassificationDataModule
-from model.lightning_model import ClassificationModel
-
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 torch.set_float32_matmul_precision('high')
 
 
@@ -18,7 +18,7 @@ class DataAwareModelCLI(LightningCLI):
 if __name__ == '__main__':
     cli = DataAwareModelCLI(ClassificationModel,
                             MIMICClassificationDataModule,
-                            save_config_kwargs=dict(overwrite=True)
+                            save_config_kwargs={"overwrite": True},
                             )
-    if cli.subcommand == 'fit':
+    if cli.subcommand == 'fit' and cli.trainer is not None:
         cli.trainer.test(ckpt_path='best', datamodule=cli.datamodule)

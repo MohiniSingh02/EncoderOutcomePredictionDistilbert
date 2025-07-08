@@ -56,12 +56,14 @@ model:
 
 
 data:
-  data_dir: /data-pvc/MIMICIV/icd9/icu
-  batch_size: 4
-  eval_batch_size: 128
-  pretrained_model: kamalkraj/distilBioBERT
-  num_workers: 16
-  truncate_again: true
+  class_path: src.model.dataset.MIMICClassificationDataModule
+  init_args: 
+    data_dir: /data-pvc/MIMICIV/icd9/icu
+    batch_size: 4
+    eval_batch_size: 128
+    pretrained_model: kamalkraj/distilBioBERT
+    num_workers: 16
+    truncate_again: true
 
   
 ckpt_path: null
