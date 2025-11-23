@@ -14,11 +14,11 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:distilbert
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:multitask
           command: [
               "wandb", "agent",
               "--count", "10",
-              "datexis-phd/EncoderOutcomePred/5xx1yyfx"
+              "s90444-berliner-hochschule-f-r-technik/EncoderOutcomePred/5xx1yyfx"
           ]
           env:
             - name: LANG
@@ -39,6 +39,8 @@ spec:
                 secretKeyRef:
                   name: wandb
                   key: api_key
+            - name: WANDB_DIR
+              value: "/model-pvc/wandb"
           resources:
             requests:
               cpu: "1"

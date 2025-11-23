@@ -16,8 +16,6 @@ spec:
       labels:
         app: github-runner-encoder-clinical-outcome
     spec:
-      nodeSelector:
-        cpuclass: epyc
       initContainers:
         - name: volume-mount-hack
           image: busybox
@@ -29,14 +27,7 @@ spec:
       - name: github-runner
         image: tcardonne/github-runner
         securityContext:
-          privileged: false
-        resources:
-            requests:
-              cpu: "4"
-              memory: "4Gi"
-            limits:
-              cpu: "8"
-              memory: "8Gi"
+          privileged: true
         env:
         - name: RUNNER_NAME
           value: "github-runner-encoder-clinical-outcome"

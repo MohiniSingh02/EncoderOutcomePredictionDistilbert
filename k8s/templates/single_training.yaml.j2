@@ -15,11 +15,22 @@ spec:
           image: registry.datexis.com/tsteffek/encoderoutcomeprediction:{{ image_tag }}
           command:
             - "python"
-            - "classification_main.py"
+            - "src/classification_main.py"
             - "fit"
-            - "--config=config.yaml"
+            {% if multitask %}
+            - "--config=src/config_multitask_{{ mimic_split }}.yaml"
+            {% else %}
+            - "--config=src/config.yaml"
+            {% endif %}
             - "--trainer.default_root_dir=/model-pvc/{{ icd_version }}-{{ mimic_split }}"
+             {% if multitask %}
+            - "--data.multitask=true"
+            - "--data.icd9_data_dir=/data-pvc/data/mimic-iv/icd9/{{ mimic_split }}/"
+            - "--data.icd10_data_dir=/data-pvc/data/mimic-iv/icd10/{{ mimic_split }}/"
+            {% else %}
             - "--data.data_dir=/data-pvc/data/mimic-iv/{{ icd_version }}/{{ mimic_split }}/"
+            {% endif %}
+            - "--data.truncate_again={{ truncate_again }}"
             - "--data.pretrained_model={{ model }}"
           env:
             - name: LANG

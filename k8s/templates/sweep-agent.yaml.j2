@@ -18,7 +18,7 @@ spec:
           command: [
               "wandb", "agent",
               "--count", "{{ hpo_count }}",
-              "datexis-phd/EncoderOutcomePred/{{ sweep_id }}"
+              "s90444-berliner-hochschule-f-r-technik/EncoderOutcomePred/{{ sweep_id }}"
           ]
           env:
             - name: LANG
@@ -39,6 +39,8 @@ spec:
                 secretKeyRef:
                   name: wandb
                   key: api_key
+            - name: WANDB_DIR
+              value: "/model-pvc/wandb"
           resources:
             requests:
               cpu: "1"

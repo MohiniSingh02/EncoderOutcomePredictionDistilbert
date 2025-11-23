@@ -4,7 +4,7 @@ import torch
 from dataclasses import dataclass
 from torch import tensor
 from torch.nn import BCEWithLogitsLoss
-from transformers import DistilBertModel, DistilBertConfig, PreTrainedModel
+from transformers import BertPreTrainedModel, BertConfig, BertModel, MegatronBertModel
 from transformers.utils import ModelOutput
 
 
@@ -18,14 +18,12 @@ class TunedSequenceClassifierOutput(ModelOutput):
             Classification (or regression if config.num_labels==1) loss.
         logits (`torch.FloatTensor` of shape `(batch_size, config.num_labels)`):
             Classification (or regression if config.num_labels==1) scores (before SoftMax).
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or
-        when `config.output_hidden_states=True`):
+        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
             Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
             one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when
-        `config.output_attentions=True`):
+        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
             Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
             sequence_length)`.
 
@@ -41,17 +39,18 @@ class TunedSequenceClassifierOutput(ModelOutput):
     untuned_logits: Optional[torch.FloatTensor] = None
 
 
-class DistilBertForSequenceClassification(PreTrainedModel):
-    config_class = DistilBertConfig
-
-    def __init__(self, config: DistilBertConfig):
+class BertForSequenceClassificationWithoutPooling(BertPreTrainedModel):
+    def __init__(self, config: BertConfig):
         super().__init__(config)
-        self.tuning_weights = None
         self.config = config
 
-        self.bert = DistilBertModel(config)
-        self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
+        if 'megatron' in config.model_type:
+            config._attn_implementation = 'eager'
+            self.bert = MegatronBertModel(config, add_pooling_layer=False)
+        else:
+            self.bert = BertModel(config, add_pooling_layer=False)
 
+        self.classifier = torch.nn.Linear(config.hidden_size, config.num_labels)
         self.register_buffer('tuning_weights', torch.empty(config.num_labels, dtype=torch.float))
         self.register_buffer('thresholds', torch.empty(config.num_labels, dtype=torch.float))
 
@@ -65,6 +64,10 @@ class DistilBertForSequenceClassification(PreTrainedModel):
             self,
             input_ids: Optional[torch.Tensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
+            token_type_ids: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            inputs_embeds: Optional[torch.Tensor] = None,
             labels: Optional[torch.Tensor] = None,
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
@@ -80,15 +83,20 @@ class DistilBertForSequenceClassification(PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.bert(
-            input_ids=input_ids,
+            input_ids,
             attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=True,
+            return_dict=return_dict,
         )
 
-        pooled_output = outputs.last_hidden_state[:, 0]
-        logits = self.classifier(pooled_output)
+        last_state_cls_token = outputs[0][:, 0]
+
+        logits = self.classifier(last_state_cls_token)
 
         loss = None
         if labels is not None:
@@ -130,7 +138,6 @@ class DistilBertForSequenceClassification(PreTrainedModel):
                 self.thresholds[i] = min(t[0] - 1e-6, 0.5)
             else:  # else take the middle between the best and the previous one
                 self.thresholds[i] = (t[ix - 1] + t[ix]) / 2
-
             self.tuning_weights = torch.log(1 / self.thresholds - 1)
 
     def get_labels_from_result(self, logits: tensor, topk: int = None):

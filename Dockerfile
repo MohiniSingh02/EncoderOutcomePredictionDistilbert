@@ -1,16 +1,20 @@
-FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-devel
-FROM registry.datexis.com/tsteffek/encoderoutcomeprediction:distilbert
+FROM pytorch/pytorch:2.9.0-cuda13.0-cudnn9-devel
+
+WORKDIR /workspace/EncoderOutcomePrediction
+
+ENV PYTHONPATH=/workspace/EncoderOutcomePrediction
+ENV TOKENIZERS_PARALLELISM=false
+ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+ENV DEBIAN_FRONTEND=noninteractive
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
-RUN pip install transformers
+
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir wandb==0.18.1 && \
+    pip cache purge && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 
-WORKDIR /src
 COPY . .
 
-ENV PYTHONPATH=/src
-RUN sed -i 's/from src\.model/from model/g' /src/classification_main.py
-
-
-CMD ["/usr/sbin/sshd", "-D"]
+ENTRYPOINT ["python", "src/classification_main.py"]
