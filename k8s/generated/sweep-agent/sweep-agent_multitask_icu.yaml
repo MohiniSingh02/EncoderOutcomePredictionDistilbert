@@ -1,31 +1,27 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: encoder-outcome-prediction-icd9-hosp
+  name: encoder-outcome-prediction-multitask-icu-agent
   labels:
     app: encoder-outcome-prediction
+    sweep: multitask-icu
 spec:
+  completions: 2
+  parallelism: 2
   template:
     metadata:
       labels:
         app: encoder-outcome-prediction
+        sweep: multitask-icu
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:multitask
-          command:
-            - "python"
-            - "src/classification_main.py"
-            - "fit"
-            
-            - "--config=src/config.yaml"
-            
-            - "--trainer.default_root_dir=/model-pvc/icd9-hosp"
-             
-            - "--data.data_dir=/data-pvc/data/mimic-iv/icd9/hosp/"
-            
-            - "--data.truncate_again=True"
-            - "--data.pretrained_model=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:multitask-PMBv2
+          workingDir: /workspace/EncoderOutcomePrediction
+          command: [
+              "wandb", "agent",
+              "s90444-berliner-hochschule-f-r-technik/EncoderOutcomePred/pe11u4kh"
+          ]
           env:
             - name: LANG
               value: 'C.UTF-8'
@@ -35,6 +31,8 @@ spec:
               value: 'INFO'
             - name: HF_HOME
               value: "/model-pvc/huggingface_cache"
+            - name: WANDB_AGENT_RUN_DIR
+              value: "/workspace/EncoderOutcomePrediction"
             - name: WANDB_ENTITY
               valueFrom:
                 secretKeyRef:
@@ -45,6 +43,8 @@ spec:
                 secretKeyRef:
                   name: wandb
                   key: api_key
+            - name: WANDB_DIR
+              value: "/model-pvc/wandb"
           resources:
             requests:
               cpu: "1"

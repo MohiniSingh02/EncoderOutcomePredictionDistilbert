@@ -1,0 +1,66 @@
+# lightning.pytorch==2.3.3
+seed_everything: 42
+
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: '1'
+  num_nodes: 1
+  precision: bf16-mixed
+
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: EncoderOutcomePred
+      name: multitask_icd9+icd10_hosp
+      group: icd_experiments
+      save_dir: /model-pvc
+      tags: ["multitask", "icd9", "icd10", "hosp"]
+
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: Val/HARMONIC/AUROC
+      patience: 10
+      mode: max
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      filename: epoch={epoch}-val_harmonic_auroc={Val/HARMONIC/AUROC:.2f}
+      monitor: Val/HARMONIC/AUROC
+      save_top_k: 1
+      mode: max
+    # Optional: per-task checkpoints
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      filename: epoch={epoch}-val_icd9_auroc={Val/ICD9/AUROC:.2f}
+      monitor: Val/ICD9/AUROC
+      save_top_k: 1
+      mode: max
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      filename: epoch={epoch}-val_icd10_auroc={Val/ICD10/AUROC:.2f}
+      monitor: Val/ICD10/AUROC
+      save_top_k: 1
+      mode: max
+
+  max_epochs: 20
+  log_every_n_steps: 10
+  default_root_dir: /model-pvc
+
+model:
+  multitask: true
+  warmup_steps: 0
+  decay_steps: 50000
+  weight_decay: 0.01
+  lr: 2.0e-05
+
+data:
+  multitask: true      # multitask mode
+  icd9_data_dir: /data-pvc/data/mimic-iv/icd9/hosp
+  icd10_data_dir: /data-pvc/data/mimic-iv/icd10/hosp
+  batch_size: 4
+  eval_batch_size: 128
+  pretrained_model: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
+  truncate_again: True
+
+ckpt_path: null

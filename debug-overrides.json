@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "containers": [
+      {
+        "name": "debug",
+        "image": "registry.datexis.com/mohin/encoderoutcomeprediction:multitask",
+        "command": ["/bin/bash"],
+        "stdin": true,
+        "tty": true
+      }
+    ]
+  }
+}

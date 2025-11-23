@@ -1,0 +1,5 @@
+﻿{
+  "imagePullSecrets": [
+    { "name": "datexis-secret" }
+  ]
+}

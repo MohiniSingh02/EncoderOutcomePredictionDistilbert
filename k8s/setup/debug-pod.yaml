@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-py
+  namespace: s90444
+spec:
+  restartPolicy: Never
+  containers:
+    - name: python
+      image: python:3.10
+      stdin: true
+      tty: true
+      command: ["bash"]
+      volumeMounts:
+        - name: data
+          mountPath: /data-pvc
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: eod-pvc

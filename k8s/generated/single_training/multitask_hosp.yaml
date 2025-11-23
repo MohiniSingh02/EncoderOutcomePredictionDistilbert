@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: encoder-outcome-prediction-icd9-hosp
+  name: encoder-outcome-prediction-multitask-hosp
   labels:
     app: encoder-outcome-prediction
 spec:
@@ -12,21 +12,30 @@ spec:
     spec:
       containers:
         - name: encoder-outcome-prediction
-          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:multitask
+          workingDir: /workspace/EncoderOutcomePrediction
+          image: registry.datexis.com/tsteffek/encoderoutcomeprediction:multitask-PMBv2
+          imagePullPolicy: Always
           command:
             - "python"
             - "src/classification_main.py"
             - "fit"
             
-            - "--config=src/config.yaml"
+            - "--config=src/config_multitask_hosp.yaml"
             
-            - "--trainer.default_root_dir=/model-pvc/icd9-hosp"
+            - "--trainer.default_root_dir=/model-pvc/multitask-hosp"
              
-            - "--data.data_dir=/data-pvc/data/mimic-iv/icd9/hosp/"
-            
+            - "--data.multitask=true"
+
+            - "--data.icd9_data_dir=/data-pvc/data/mimic-iv/icd9/hosp/"
+            - "--data.icd10_data_dir=/data-pvc/data/mimic-iv/icd10/hosp/"
+
             - "--data.truncate_again=True"
             - "--data.pretrained_model=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
           env:
+            - name: PL_DISABLE_FSWATCHER
+              value: "1"
+            - name: PYTORCH_NUM_WORKERS
+              value: "8"
             - name: LANG
               value: 'C.UTF-8'
             - name: TOKENIZERS_PARALLELISM

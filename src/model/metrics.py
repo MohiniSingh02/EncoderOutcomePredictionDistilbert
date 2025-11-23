@@ -22,19 +22,20 @@ class MultilabelSkipAUROC(RetrievalAUROC):
 
 def create_metrics(num_classes):
     return MetricCollection(
-        build_metric_at_x(RetrievalMAP, 'mAP') |
-        build_metric_at_x(RetrievalRecall, 'Recall') |
-        build_metric_at_x(RetrievalPrecision, 'Precision') |
-        build_metric_at_x(RetrievalAUROC, 'AUROC', empty_target_action='skip') |
+        {'AUROC': MultilabelSkipAUROC(num_labels=num_classes)} |
+        {f'Recall@{k}': Recall(num_labels=num_classes, average="micro", top_k=k) for k in top_ks} |
+        {f'Precision@{k}': Precision(num_labels=num_classes, average="micro", top_k=k) for k in top_ks} |
+        {f'mAP@{k}': RetrievalMAP() for k in top_ks} |
 
         micro_and_macro(Recall, 'Recall', 'multilabel', num_labels=num_classes) |
         micro_and_macro(Precision, 'Precision', 'multilabel', num_labels=num_classes) |
         micro_and_macro(F1Score, 'F1', 'multilabel', num_labels=num_classes) |
         micro_and_macro(Accuracy, 'Accuracy', 'multilabel', num_labels=num_classes) |
 
-        {'AUROC': MultilabelSkipAUROC(num_labels=num_classes),
-         'MacroStats': MultilabelStatScores(num_labels=num_classes, average='macro'),
-         'MicroStats': MultilabelStatScores(num_labels=num_classes, average='micro')},
+        {
+            'MacroStats': MultilabelStatScores(num_labels=num_classes, average='macro'),
+            'MicroStats': MultilabelStatScores(num_labels=num_classes, average='micro')
+        }
     )
 
 
@@ -46,7 +47,6 @@ def create_main_diagnosis_metrics(num_classes):
         micro_and_macro(Accuracy, 'Accuracy', 'multiclass', num_classes=num_classes, at_x=True),
         postfix='_Main'
     )
-
 
 
 def micro_and_macro(metric_cls, name, *args, at_x=False, **kwargs):

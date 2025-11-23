@@ -1,35 +1,62 @@
 command:
   - ${env}
   - "python"
-  - "classification_main.py"
+  - "-m"
+  - "src/classification_main.py"
   - "fit"
-  - "--config=config.yaml"
+  
+  - "--config=src/config_icd10.yaml"
+  - "--data.data_dir=/data-pvc/data/mimic-iv/icd10/icu/"
+  
   - "--trainer.default_root_dir=/model-pvc/icd10-icu"
   - "--trainer.max_epochs=20"
-  - "--data.data_dir=/data-pvc/data/mimic-iv/icd10/icu/"
-  - "--data.pretrained_model=kamalkraj/distilBioBERT"
-  - ${args}
+  - "--data.truncate_again=True"
+  - "--data.pretrained_model=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+  - "--model.lr=${lr}"
+  - "--model.warmup_steps=${warmup_steps}"
+  - "--model.weight_decay=${weight_decay}"
+  - "--model.decay_steps=${decay_steps}"
+  - "--data.batch_size=${batch_size}"
+
+
+
 method: bayes
+
+
 metric:
   name: Val/AUROC
   goal: maximize
+
+
 parameters:
-  model:
-    parameters:
-      lr:
-        min: 1e-6
-        max: 1e-3
-        distribution: log_uniform
-      warmup_steps:
-        min: 0
-        max: 5000
-      weight_decay:
-        min: 1e-4
-        max: 0.1
-        distribution: log_uniform
-      decay_steps:
-        values: [10000, 20000, 30000, 40000, 50000]
-  data:
-    parameters:
-      batch_size:
-        values: [16, 32, 64, 128]
+  lr:
+    min: !!float 1e-6
+    max: !!float 1e-3
+    distribution: log_uniform_values
+
+  warmup_steps:
+    min: 0
+    max: 5000
+
+  weight_decay:
+    min: !!float 1e-4
+    max: !!float 0.1
+    distribution: log_uniform_values
+
+  decay_steps:
+    values: [10000, 20000, 30000, 40000, 50000]
+
+  batch_size:
+    values: [16, 32, 64, 128]
+
+program: classification_main.py
+
+project: EncoderOutcomePred
+entity: s90444-berliner-hochschule-f-r-technik
+
+name: >
+  
+  icd10_icu
+  
+
+

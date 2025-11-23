@@ -1,0 +1,60 @@
+program: src/classification_main.py
+
+method: bayes
+
+metric:
+  name: Val/HARMONIC/AUROC
+  goal: maximize
+
+parameters:
+  model.lr:
+    min: 1e-5
+    max: 8e-5
+    distribution: log_uniform_values
+
+  model.warmup_steps:
+    min: 0
+    max: 2000
+
+  model.weight_decay:
+    min: 0.001
+    max: 0.02
+    distribution: log_uniform_values
+
+  model.decay_steps:
+    values: [20000, 30000, 40000]
+
+  data.batch_size:
+    values: [32, 64]
+
+
+command:
+  - python
+  - -m
+  - src.classification_main
+  - fit
+  - --config=src/config_multitask_icu.yaml
+  - --data.icd9_data_dir=/data-pvc/data/mimic-iv/icd9/icu
+  - --data.icd10_data_dir=/data-pvc/data/mimic-iv/icd10/icu
+  - --trainer.default_root_dir=/model-pvc/multitask-icu-multitask
+  - --trainer.max_epochs=20
+  - --data.truncate_again=true
+  - --data.pretrained_model=microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
+  - ${args}
+
+project: EncoderOutcomePred
+entity: s90444-berliner-hochschule-f-r-technik
+name: multitask_icu
+group: multitask-fix
+
+hydra:
+  job:
+    config:
+      override_dirname:
+        exclude_keys:
+          - data.multitask
+          - model.multitask
+          - data.icd9_data_dir
+          - data.icd10_data_dir
+          - model.num_labels
+          - model.config.num_labels

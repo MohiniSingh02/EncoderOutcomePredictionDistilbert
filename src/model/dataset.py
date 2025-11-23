@@ -9,91 +9,162 @@ from lightning import LightningDataModule
 from pandas import DataFrame
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoConfig, PretrainedConfig
+from lightning.pytorch.utilities.combined_loader import CombinedLoader
 
 
 class MIMICClassificationDataModule(LightningDataModule):
     def __init__(self,
                  data_dir: Path = Path("../../../data"),
+                 icd9_data_dir: Optional[Path] = None,
+                 icd10_data_dir: Optional[Path] = None,
+                 multitask: bool = False,
                  batch_size: int = 4,
                  eval_batch_size: int = 4,
-                 pretrained_model: str = "kamalkraj/distilBioBERT",
-                 num_workers: int = 0,
-                 truncate_again: bool = False,
-                 **kwargs):
+                 pretrained_model: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
+                 truncate_again: bool = True):
         super().__init__()
-        self.icd_version = int(extract_re_group(str(data_dir), r'icd-?(\d{1,2})'))
-        self.hospital_type = extract_re_group(str(data_dir), r'(icu|hosp)')
-        self.save_hyperparameters("data_dir", "batch_size", "eval_batch_size", "pretrained_model", "num_workers",
-                                  "truncate_again")
-        self.data_dir = data_dir.absolute()
-        self.truncate_again = truncate_again
-        self.kwargs = kwargs
+        self.multitask = multitask
+        # self.icd_version = int(extract_re_group(str(data_dir), r'icd-?(\d{1,2})'))
+        # self.hospital_type = extract_re_group(str(data_dir), r'(icu|hosp)')
+        self.save_hyperparameters()
 
-        print(f"[DataModule] Truncate again: {self.truncate_again}")
-        print(f"[DEBUG] Using data_dir: {self.data_dir}")
-        print(f"[DEBUG] Truncate again = {truncate_again}")
+        if multitask:
+            assert icd9_data_dir is not None and icd10_data_dir is not None, \
+                "For multitask mode, you must set both icd9_data_dir and icd10_data_dir"
 
-        # Load and cache splits
-        splits_icd9 = load_splits(data_dir, 9, truncate_labels=self.truncate_again)
-        splits_icd10 = load_splits(data_dir, 10, truncate_labels=self.truncate_again)
+            self.icd9_data_dir = Path(icd9_data_dir).absolute()
+            self.icd10_data_dir = Path(icd10_data_dir).absolute()
+            self.icd_version = "multitask"
 
-        self.label2id = {'icd9': compute_label_idx(*splits_icd9.values()),
-                         'icd10': compute_label_idx(*splits_icd10.values())}
+            # load splits for ICD9 and ICD10
+            data_dfs_9 = load_splits(self.icd9_data_dir, 9 if truncate_again else None)
+            data_dfs_10 = load_splits(self.icd10_data_dir, 10 if truncate_again else None)
 
-        self.num_labels = {'icd9': len(self.label2id['icd9']),
-                           'icd10': len(self.label2id['icd10'])
-                           }
-        # Combine data into a unified structure with task_name
-        self.data = {'train': [], 'val': [], 'test': []}
-        for version, splits in [('icd9', splits_icd9), ('icd10', splits_icd10)]:
-            for split_name, df in splits.items():
-                df['task_name'] = version
-                self.data[split_name].extend(df.to_dict('records'))
+            self.label2id_icd9 = compute_label_idx(*data_dfs_9.values())
+            self.label2id_icd10 = compute_label_idx(*data_dfs_10.values())
 
-        # Tokenizer and collator
-        self.config = AutoConfig.from_pretrained(pretrained_model)
-        self.collator = ClassificationCollator(self.config)
+            self.data_icd9 = {split: split_df.to_dict('records') for split, split_df in data_dfs_9.items()}
+            self.data_icd10 = {split: split_df.to_dict('records') for split, split_df in data_dfs_10.items()}
 
-        self.num_workers = num_workers
+            self.num_labels_icd9 = len(self.label2id_icd9)
+            self.num_labels_icd10 = len(self.label2id_icd10)
+
+            self.num_labels = max(self.num_labels_icd9, self.num_labels_icd10)
+
+            self.config = AutoConfig.from_pretrained(pretrained_model)
+
+        else:
+            self.data_dir = Path(data_dir).absolute()
+            self.icd_version = int(extract_re_group(str(data_dir), r'icd-?(\d{1,2})'))
+            self.hospital_type = extract_re_group(str(data_dir), r'(icu|hosp)')
+
+            data_dfs = load_splits(self.data_dir, self.icd_version if truncate_again else None)
+            self.label2id = compute_label_idx(*data_dfs.values())
+            self.data = {split: split_df.to_dict('records') for split, split_df in data_dfs.items()}
+
+            self.num_labels = len(self.label2id)
+            self.config = AutoConfig.from_pretrained(pretrained_model, label2id=self.label2id,
+                                                     id2label={v: k for k, v in self.label2id.items()},
+                                                     num_labels=self.num_labels)
+
+        import os
+        self.num_workers = int(os.environ.get("PYTORCH_NUM_WORKERS", 0))
+        # default to 0 for safety
+        if self.num_workers is None:
+            self.num_workers = 0
         self.batch_size = batch_size
         self.eval_batch_size = eval_batch_size
+        self.collator = ClassificationCollator(self.config)
 
         self.mimic_train, self.mimic_val, self.mimic_test = None, None, None
 
     def setup(self, stage: Optional[str] = None):
+        if self.multitask:
+            if stage == "fit" or stage is None:
+                self.mimic_train = {
+                    "icd9": ClassificationDataset(self.data_icd9['train'], label2id=self.label2id_icd9),
+                    "icd10": ClassificationDataset(self.data_icd10['train'], label2id=self.label2id_icd10)
+                }
+                self.mimic_val = {
+                    "icd9": ClassificationDataset(self.data_icd9['val'], label2id=self.label2id_icd9),
+                    "icd10": ClassificationDataset(self.data_icd10['val'], label2id=self.label2id_icd10)
+                }
+                print("ICD9 Train:", len(self.mimic_train["icd9"]))
+                print("ICD10 Train:", len(self.mimic_train["icd10"]))
+            if stage == "test" or stage is None:
+                self.mimic_test = {
+                    "icd9": ClassificationDataset(self.data_icd9['test'], label2id=self.label2id_icd9),
+                    "icd10": ClassificationDataset(self.data_icd10['test'], label2id=self.label2id_icd10)
+                }
+
+                print("ICD9 Test:", len(self.mimic_test["icd9"]))
+                print("ICD10 Test:", len(self.mimic_test["icd10"]))
+
+            return
+
         if stage == "fit" or stage is None:
-            self.mimic_train = ClassificationDataset(self.data['train'], self.label2id)
-            self.mimic_val = ClassificationDataset(self.data['val'], self.label2id)
-            print("Train Length: ", len(self.mimic_train))
-            print("Val length: ", len(self.mimic_val))
+            self.mimic_train = ClassificationDataset(self.data['train'], label2id=self.label2id)
+            self.mimic_val = ClassificationDataset(self.data['val'], label2id=self.label2id)
+            print("Train Length:", len(self.mimic_train))
+            print("Val Length:", len(self.mimic_val))
+
         if stage == "test" or stage is None:
-            self.mimic_test = ClassificationDataset(self.data['test'], self.label2id)
-            print("Test length: ", len(self.mimic_test))
+            self.mimic_test = ClassificationDataset(self.data['test'], label2id=self.label2id)
+            print("Test Length:", len(self.mimic_test))
 
     def train_dataloader(self):
-        return DataLoader(self.mimic_train,
-                          batch_size=self.batch_size,
-                          collate_fn=self.collator,
-                          pin_memory=True,
-                          num_workers=self.num_workers,
-                          shuffle=True,
-                          persistent_workers=self.num_workers > 0)
+        if self.multitask:
+            icd9_loader = DataLoader(self.mimic_train["icd9"], batch_size=self.batch_size,
+                                     collate_fn=self.collator, pin_memory=True,
+                                     num_workers=self.num_workers
+                                     , shuffle=True)
+            icd10_loader = DataLoader(self.mimic_train["icd10"], batch_size=self.batch_size,
+                                      collate_fn=self.collator, pin_memory=True,
+                                      num_workers=self.num_workers
+                                      , shuffle=True)
+            return CombinedLoader(
+                {"icd9": icd9_loader, "icd10": icd10_loader},
+                mode="zip"
+            )
+        return DataLoader(self.mimic_train, batch_size=self.batch_size,
+                          collate_fn=self.collator, pin_memory=True,
+                          num_workers=self.num_workers
+                          , shuffle=True
+                          )
 
     def val_dataloader(self):
-        return DataLoader(self.mimic_val,
-                          batch_size=self.eval_batch_size,
-                          collate_fn=self.collator,
-                          pin_memory=True,
-                          num_workers=self.num_workers,
-                          persistent_workers=self.num_workers > 0)
+        if self.multitask:
+            icd9_loader = DataLoader(
+                self.mimic_val["icd9"], batch_size=self.eval_batch_size,
+                collate_fn=self.collator, pin_memory=True,
+                num_workers=self.num_workers
+            )
+            icd10_loader = DataLoader(
+                self.mimic_val["icd10"], batch_size=self.eval_batch_size,
+                collate_fn=self.collator, pin_memory=True,
+                num_workers=self.num_workers
+            )
+            return [icd9_loader, icd10_loader]
+        return DataLoader(self.mimic_val, batch_size=self.eval_batch_size,
+                          collate_fn=self.collator, pin_memory=True,
+                          num_workers=self.num_workers)
 
     def test_dataloader(self):
-        return DataLoader(self.mimic_test,
-                          batch_size=self.eval_batch_size,
-                          collate_fn=self.collator,
-                          pin_memory=True,
-                          num_workers=self.num_workers,
-                          persistent_workers=self.num_workers > 0)
+        if self.multitask:
+            icd9_loader = DataLoader(
+                self.mimic_test["icd9"], batch_size=self.eval_batch_size,
+                collate_fn=self.collator, pin_memory=True,
+                num_workers=self.num_workers
+            )
+            icd10_loader = DataLoader(
+                self.mimic_test["icd10"], batch_size=self.eval_batch_size,
+                collate_fn=self.collator, pin_memory=True,
+                num_workers=self.num_workers
+            )
+            return [icd9_loader, icd10_loader]
+        return DataLoader(self.mimic_test, batch_size=self.eval_batch_size,
+                          collate_fn=self.collator, pin_memory=True,
+                          num_workers=self.num_workers)
 
 
 def extract_re_group(input_string, pattern):
@@ -101,9 +172,9 @@ def extract_re_group(input_string, pattern):
     return match.group(1) if match else 'not found'
 
 
-def load_splits(data_dir, icd_version, truncate_labels=True):
+def load_splits(data_dir, icd_version):
     return {
-        split: preprocess(load_data_from(data_dir, f'*{split}*'), icd_version if truncate_labels else None)
+        split: preprocess(load_data_from(data_dir, f'*{split}*'), icd_version)
         for split in ['train', 'val', 'test']
     }
 
@@ -111,76 +182,46 @@ def load_splits(data_dir, icd_version, truncate_labels=True):
 def load_data_from(path: Path, glob: str):
     files = list(path.glob(glob))
     logging.warning(f'Detected {len(files)} files for glob {glob}: {files}')
-    dfs = []
-
-    for file in files:
-        try:
-            if file.suffix == '.csv':
-                df = pd.read_csv(file)
-            elif file.suffix == '.parquet':
-                df = pd.read_parquet(file)
-            else:
-                logging.warning(f"Unsupported file type: {file.suffix}")
-                continue
-
-            df.columns = df.columns.str.lower()
-            if 'test' in df.columns:
-                df.drop(columns='test', inplace=True)
-            if 'short_codes' in df and 'labels' not in df.columns:
-                df.rename(columns={'short_codes': 'labels'}, inplace=True)
-            if not df.empty and 'labels' in df.columns and isinstance(df.labels.iloc[0], str):
-                df.labels = df.labels.str.replace(r"[\[\]' ]", "", regex=True).str.split(",")
-            if 'text' in df.columns:
-                df.text = df.text.astype(str).str.strip()
-
-            dfs.append(df)
-        except Exception as e:
-            logging.error(f"Failed to process file {file.name}: {e}")
-
-    if not dfs:
-        raise ValueError(f"No valid dataframes could be loaded from {path} with glob '{glob}'")
-
-    return pd.concat(dfs, ignore_index=True)
+    dfs = [pd.read_csv(file) if file.suffix == '.csv' else
+           pd.read_parquet(file) if file.suffix == '.parquet' else None
+           for file in files]
+    for df in dfs:
+        df.columns = df.columns.str.lower()
+        if 'test' in df:
+            df.drop(columns='test', inplace=True)
+        if 'short_codes' in df and 'labels' not in df:
+            df.rename(columns={'short_codes': 'labels'}, inplace=True)
+        if isinstance(df.labels.iloc[0], str):
+            df.labels = df.labels.str.replace(r"[\[\]' ]", "", regex=True).str.split(",")
+        df.text = df.text.str.strip()
+    return pd.concat(dfs)
 
 
 def preprocess(df: DataFrame, truncate_to_icd_version: int) -> DataFrame:
-    if truncate_to_icd_version:
-        print(f"[INFO] Truncating to ICD-{truncate_to_icd_version}")
-    else:
-        print("[INFO] Skipping truncation")
-
-    filtered = df[df.labels.str.len().astype(bool)].copy()
+    filtered_empty = filter_empty_labels(df)
     if truncate_to_icd_version is not None:
-        filtered['labels'] = (
-            filtered['labels'].apply(truncate_labels_9 if truncate_to_icd_version == 9 else truncate_labels_10)
+        filtered_empty['labels'] = (
+            filtered_empty['labels'].apply(truncate_labels_9 if truncate_to_icd_version == 9 else truncate_labels_10)
         )
-    return filtered
+    return filtered_empty
 
 
-# def filter_empty_labels(df: DataFrame) -> DataFrame:
-# return df[df.labels.str.len().astype(bool)]
+def filter_empty_labels(df: DataFrame) -> DataFrame:
+    return df[df.labels.str.len().astype(bool)]
 
 
 def truncate_labels_9(labels: list[str]) -> list[str]:
-    clean = []
-    for label in labels:
-        if not isinstance(label, str):
-            continue
-        label = label.strip()
-        if not label:
-            continue
-        clean.append(label[:4] if label.startswith('E') else label[:3])
-    return clean
+    return [label[:4] if label.startswith('E') else label[:3] for label in labels]
 
 
 def truncate_labels_10(labels: list[str]) -> list[str]:
-    return [label[:3] for label in labels if isinstance(label, str) and label.strip()]
+    return [label[:3] for label in labels]
 
 
 def compute_label_idx(*dfs: DataFrame) -> dict[str, int]:
     labels: pd.Series = pd.concat([df['labels'] for df in dfs], ignore_index=True)
     label_distribution = labels.explode().value_counts()
-    label_idx = {label: idx for idx, label in enumerate(label_distribution.index)}
+    label_idx = label_distribution.reset_index().labels.reset_index().set_index('labels')['index'].to_dict()
     return label_idx
 
 
@@ -191,21 +232,28 @@ class ClassificationCollator:
 
     def __call__(self, data):
         admission_notes = [x['admission_note'] for x in data]
-        tokenized = self.tokenizer(admission_notes, padding='max_length', truncation=True, max_length=512,
-                                   return_tensors='pt')
+        tokenized = self.tokenizer(admission_notes, padding=True, truncation=True)
+
+        input_ids = [torch.tensor(x) for x in tokenized["input_ids"]]
+        attention_masks = [torch.tensor(x, dtype=torch.bool) for x in tokenized["attention_mask"]]
+        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids,
+                                                    batch_first=True,
+                                                    padding_value=self.tokenizer.pad_token_id)
+        attention_masks = torch.nn.utils.rnn.pad_sequence(attention_masks,
+                                                          batch_first=True,
+                                                          padding_value=0)
 
         labels = torch.stack([x['labels'] for x in data])
-        first_codes = torch.tensor([x['first_code'] for x in data])
+        lengths = torch.tensor([len(x) for x in input_ids])
         query_idces = torch.tensor([x['first_code'] for x in data]).unsqueeze(1).expand_as(labels).contiguous()
 
-        return {"input_ids": tokenized["input_ids"],
-                "attention_mask": tokenized["attention_mask"],
+        return {"input_ids": input_ids,
+                "attention_mask": attention_masks,
                 "labels": labels,
-                "lengths": torch.sum(tokenized["attention_mask"], dim=1),
+                "lengths": lengths,
                 'query_idces': query_idces,
-                'first_codes': first_codes,
-                'raw_labels': [x['raw_labels'] for x in data],
-                'task_names': [x['task_name'] for x in data]
+                'first_codes': torch.tensor([x['first_code'] for x in data]),
+                'raw_labels': [x['raw_labels'] for x in data]
                 }
 
 
@@ -222,20 +270,17 @@ class ClassificationDataset(torch.utils.data.Dataset):
         example = self.examples[idx]
         note = example['text']
         labels = example['labels']
-        task = example['task_name']
         hadm_id = example['hadm_id']
 
-        label_map = self.label2id[task]
-        label_ids = [label_map[x] for x in labels if x in label_map]
-        label_tensor = torch.zeros(len(label_map), dtype=torch.float32)
-        if label_ids:
-            label_tensor[label_ids] = 1
+        label_ids = [self.label2id[x] for x in labels]
+        label_idxs = torch.tensor([x for x in label_ids], dtype=torch.int)
+        labels = torch.zeros(len(self.label2id), dtype=torch.float32)
+        labels[label_idxs] = 1
 
         return {'admission_note': note,
-                'labels': label_tensor,
+                'labels': labels,
                 'hadm_id': hadm_id,
-                'first_code': label_ids[0] if label_ids else -1,
+                'first_code': label_ids[0],
                 'idx': idx,
-                'raw_labels': labels,
-                'task_name': task
+                'raw_labels': example['labels']
                 }
